@@ -1,1 +1,1 @@
-Data yang digunakan untuk Backtesting.ipynb
+Data yang digunakan untuk backtesting
