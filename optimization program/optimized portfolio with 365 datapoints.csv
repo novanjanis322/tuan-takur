@@ -1,0 +1,2 @@
+Period,Lookback_Days,portfolio_risk,stock,weight
+2023-01-01,365,3.1784605803645247,"['BBNI.JK', 'BYAN.JK', 'PNBN.JK']","[0.0, 0.9, 0.1]"

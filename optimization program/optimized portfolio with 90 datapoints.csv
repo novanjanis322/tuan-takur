@@ -1,0 +1,2 @@
+Period,Lookback_Days,portfolio_risk,stock,weight
+2023-01-01,90,9.227391586406311,"['BSIM.JK', 'SINI.JK']","[0.1, 0.9]"
