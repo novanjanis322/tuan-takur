@@ -15,12 +15,12 @@ df = df.sort_values(by='date').drop_duplicates(subset=['date', 'ticker'])
 
 # Loop through each month between the start date and end date
 current_date = start_date
-results = []
 
 # Adding 180 and 365 data points to the options
 lookback_days_options = [30, 60, 90, 180, 365]
 
 for lookback_days in lookback_days_options:
+    results = []
     print(f"\n### Calculating with {lookback_days} data points ###\n")
 
     current_date = start_date
@@ -36,7 +36,7 @@ for lookback_days in lookback_days_options:
 
         # Check for missing data and drop columns or fill missing values as needed
         df_pivot = df_pivot.dropna(how='all', axis=1)  # Drop tickers with no data
-        df_pivot = df_pivot.fillna(method='ffill').fillna(method='bfill')  # Forward and backward fill missing values
+        df_pivot = df_pivot.ffill().bfill()
 
         # Calculate the returns based on the previous `lookback_days`
         monthly_returns = df_pivot.pct_change().dropna()
@@ -137,7 +137,9 @@ for lookback_days in lookback_days_options:
         if model.status == GRB.OPTIMAL:
             total_expected_return = 0  # Initialize total expected return
             portfolio_risk_expr = 0  # Initialize the risk expression for the portfolio
-
+            stock_optimized = [stock for stock in stock_names if allocation_vars[stock].X > 1e-6]
+            stock_weight = [round(allocation_vars[stock].X, 2) for stock in stock_names if
+                            allocation_vars[stock].X > 1e-6]
             allocations = {stock: allocation_vars[stock].X for stock in stock_names if allocation_vars[stock].X > 1e-6}
 
             for stock in allocations:
@@ -159,7 +161,10 @@ for lookback_days in lookback_days_options:
                 'Lookback_Days': lookback_days,
                 'total_expected_return': total_expected_return,
                 'portfolio_risk': portfolio_risk,
+                'stock': stock_optimized,
+                'weight': stock_weight,
                 'allocations': allocations
+
             })
 
         else:
@@ -168,9 +173,11 @@ for lookback_days in lookback_days_options:
         # Move to the next month
         current_date += pd.DateOffset(months=1)
 
-# Convert results into a DataFrame and format the allocations for easier viewing
-results_df = pd.DataFrame(results)
-results_df['allocations'] = results_df['allocations'].apply(lambda x: ', '.join([f'{k}: {v:.2f}%' for k, v in x.items()]))
+    # Convert results into a DataFrame and format the allocations for easier viewing
+    results_df = pd.DataFrame(results)
+    results_df['allocations'] = results_df['allocations'].apply(lambda x: ', '.join([f'{k}: {v:.2f}%' for k, v in x.items()]))
+    results_df.to_csv(f'optimized_portfolio_monthlyrebalance_{lookback_days}datapoints.csv', index=False)
+
 
 # Print the final results
 print(results_df)
