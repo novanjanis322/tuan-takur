@@ -1,0 +1,169 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="SELECTIVE" />
+  </component>
+  <component name="ChangeListManager">
+    <list default="true" id="bcad2a36-8b12-49a6-80b2-e34a0579483a" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/Backtesting.ipynb" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/Backtesting_YearlyReturns.ipynb" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/MonthlyReturns.ipynb" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/data/README.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/data/data_historis_jakarta_stock_exchange_lq45.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/data/info.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/data/lookback_30.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/data/lookback_60.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/data/lookback_90.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/data/raw.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/data/tickers_monthly_returns_percentage_2023.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/monthly/Backtesting_MonthlyReturns.ipynb" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/monthly/Backtesting_MonthlyReturns_Update.ipynb" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/monthly/README.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/monthly/lq45/README.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/monthly/lq45/data_historis_jakarta_stock_exchange_lq45.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/monthly/optimized_portfolio_monthlyrebalance_180datapoints.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/monthly/optimized_portfolio_monthlyrebalance_30datapoints.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/monthly/optimized_portfolio_monthlyrebalance_365datapoints.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/monthly/optimized_portfolio_monthlyrebalance_60datapoints.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/monthly/optimized_portfolio_monthlyrebalance_90datapoints.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/monthly/summarized_portfolio.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/monthly/summarized_portfolio_180_days.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/monthly/summarized_portfolio_30_days.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/monthly/summarized_portfolio_365_days.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/monthly/summarized_portfolio_60_days.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/monthly/summarized_portfolio_90_days.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/monthly/summarized_portfolio_update.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/monthly/summarized_portfolio_with_LQ45.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/monthly/tickers/README.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/monthly/tickers/tickers_monthly_returns_percentage_2023.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/readme.md" beforeDir="false" afterPath="$PROJECT_DIR$/readme.md" afterDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="FileTemplateManagerImpl">
+    <option name="RECENT_TEMPLATES">
+      <list>
+        <option value="Python Script" />
+      </list>
+    </option>
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_BRANCH_BY_REPOSITORY">
+      <map>
+        <entry key="$PROJECT_DIR$" value="PK-2-Create-Backtesting-Algorithm" />
+      </map>
+    </option>
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="GitHubPullRequestSearchHistory">{
+  &quot;lastFilter&quot;: {
+    &quot;state&quot;: &quot;OPEN&quot;,
+    &quot;assignee&quot;: &quot;novanjanis322&quot;
+  }
+}</component>
+  <component name="GitHubPullRequestState">{
+  &quot;prStates&quot;: [
+    {
+      &quot;id&quot;: {
+        &quot;id&quot;: &quot;PR_kwDOM21twc59NnxL&quot;,
+        &quot;number&quot;: 1
+      },
+      &quot;lastSeen&quot;: 1728037591802
+    }
+  ]
+}</component>
+  <component name="GithubPullRequestsUISettings">{
+  &quot;selectedUrlAndAccountId&quot;: {
+    &quot;url&quot;: &quot;git@github.com:/TK-Bunga-Matahari/tuan-takur.git&quot;,
+    &quot;accountId&quot;: &quot;4a79651e-e6d9-4c4a-9d66-4abf7ae8b755&quot;
+  }
+}</component>
+  <component name="ProjectColorInfo">{
+  &quot;associatedIndex&quot;: 8
+}</component>
+  <component name="ProjectId" id="2mxzE8LpZj56ZirKXyVk0mhRl16" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "Python.script.executor": "Run",
+    "Python.test.executor": "Run",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "SHARE_PROJECT_CONFIGURATION_FILES": "true",
+    "git-widget-placeholder": "PK-2-analysis-report-of-backtesting-with-lq-45-as-the-benchmark",
+    "ignore.virus.scanning.warn.message": "true",
+    "last_opened_file_path": "C:/Users/Acer/Documents/Program Visual Studio Code",
+    "node.js.detected.package.eslint": "true",
+    "node.js.detected.package.tslint": "true",
+    "node.js.selected.package.eslint": "(autodetect)",
+    "node.js.selected.package.tslint": "(autodetect)",
+    "nodejs_package_manager_path": "npm",
+    "settings.editor.selected.configurable": "preferences.pluginManager",
+    "vue.rearranger.settings.migration": "true"
+  }
+}]]></component>
+  <component name="SharedIndexes">
+    <attachedChunks>
+      <set>
+        <option value="bundled-js-predefined-d6986cc7102b-5c90d61e3bab-JavaScript-PY-242.23339.19" />
+        <option value="bundled-python-sdk-0029f7779945-399fe30bd8c1-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-242.23339.19" />
+      </set>
+    </attachedChunks>
+  </component>
+  <component name="SpellCheckerSettings" RuntimeDictionaries="0" Folders="0" CustomDictionaries="0" DefaultDictionary="application-level" UseSingleDictionary="true" transferred="true" />
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="bcad2a36-8b12-49a6-80b2-e34a0579483a" name="Changes" comment="" />
+      <created>1728037505077</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1728037505077</updated>
+      <workItem from="1728037506194" duration="1024000" />
+      <workItem from="1728281810731" duration="690000" />
+      <workItem from="1728371258977" duration="1461000" />
+      <workItem from="1728444411678" duration="2681000" />
+      <workItem from="1728536720005" duration="773000" />
+    </task>
+    <servers />
+  </component>
+  <component name="TypeScriptGeneratedFilesManager">
+    <option name="version" value="3" />
+  </component>
+  <component name="UnknownFeatures">
+    <option featureType="com.intellij.fileTypeFactory" implementationName="*.md" />
+  </component>
+  <component name="Vcs.Log.Tabs.Properties">
+    <option name="TAB_STATES">
+      <map>
+        <entry key="MAIN">
+          <value>
+            <State>
+              <option name="FILTERS">
+                <map>
+                  <entry key="branch">
+                    <value>
+                      <list>
+                        <option value="origin/PK-1-create-robust-optimization-algorithm" />
+                      </list>
+                    </value>
+                  </entry>
+                </map>
+              </option>
+            </State>
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
+  <component name="VcsManagerConfiguration">
+    <option name="LAST_COMMIT_MESSAGE" value="" />
+  </component>
+  <component name="com.intellij.coverage.CoverageDataManagerImpl">
+    <SUITE FILE_PATH="coverage/tuan_takur$script.coverage" NAME="script Coverage Results" MODIFIED="1728037681612" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/optimization program" />
+  </component>
+</project>

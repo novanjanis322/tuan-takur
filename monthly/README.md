@@ -1,1 +1,0 @@
-Backtesting untuk monthly returns
