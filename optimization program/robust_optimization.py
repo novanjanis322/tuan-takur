@@ -1,6 +1,7 @@
 import pandas as pd
 import gurobipy as gp
-from gurobipy import GRB, quicksum
+from gurobipy import GRB, quicksum, gurobi
+import gurobi_license
 cap = 100000000
 invest_preference = (input("Enter your investing preference (weekly/monthly/quarterly/semester/yearly:"))
 if invest_preference == "weekly":
@@ -127,9 +128,9 @@ for i in range(invest_period+1):
     if cov_matrix is not None and len(cov_matrix) > 0:
         # Create Gurobi model for portfolio optimization
         env = gp.Env(params={
-            'WLSACCESSID': '512e8317-2c5a-4b89-853e-fb008b5025c1',
-            'WLSSECRET': '8d27cf30-e975-4c69-a7f9-2fe44fa5e5a3',
-            'LICENSEID': 2539614
+            'WLSACCESSID': gurobi_license.WLSACCESSID,
+            'WLSSECRET': gurobi_license.WLSSECRET,
+            'LICENSEID': gurobi_license.LICENSEID
         })
         model = gp.Model(env=env)
         selection_vars = model.addVars(stock_names, vtype=GRB.BINARY, name="selection")

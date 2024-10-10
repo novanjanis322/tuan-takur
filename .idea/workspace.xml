@@ -5,10 +5,9 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="bcad2a36-8b12-49a6-80b2-e34a0579483a" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/optimization program/gurobi.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Document/Diagram/Updated Documentation - Data Flow Diagram Portfolio Optimization.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/optimization program/robust_optimization.py" beforeDir="false" afterPath="$PROJECT_DIR$/optimization program/robust_optimization.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/optimization program/script.py" beforeDir="false" afterPath="$PROJECT_DIR$/optimization program/script.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -96,7 +95,7 @@
       <option name="presentableId" value="Default" />
       <updated>1728037505077</updated>
       <workItem from="1728037506194" duration="1024000" />
-      <workItem from="1728543974836" duration="538000" />
+      <workItem from="1728543974836" duration="1958000" />
     </task>
     <servers />
   </component>
@@ -133,6 +132,6 @@
     <option name="LAST_COMMIT_MESSAGE" value="" />
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
-    <SUITE FILE_PATH="coverage/tuan_takur$script.coverage" NAME="script Coverage Results" MODIFIED="1728543812613" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/optimization program" />
+    <SUITE FILE_PATH="coverage/tuan_takur$script.coverage" NAME="script Coverage Results" MODIFIED="1728546023178" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/optimization program" />
   </component>
 </project>

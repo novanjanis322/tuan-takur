@@ -2,7 +2,7 @@ import pandas as pd
 import gurobipy as gp
 from gurobipy import GRB, quicksum
 import math
-import gurobi
+import gurobi_license
 
 # Setting up the initial date limit
 start_date = pd.Timestamp('2023-01-01')  # Start at Jan 2023 (will use Dec 2022 data)
@@ -91,9 +91,9 @@ for lookback_days in lookback_days_options:
 
         # Gurobi Optimization:
         params = {
-            'WLSACCESSID': gurobi.WLSACCESSID,
-            'WLSSECRET': gurobi.WLSSECRET,
-            'LICENSEID': gurobi.LICENSEID,
+            'WLSACCESSID': gurobi_license.WLSACCESSID,
+            'WLSSECRET': gurobi_license.WLSSECRET,
+            'LICENSEID': gurobi_license.LICENSEID,
         }
         env = gp.Env(params=params)
 
