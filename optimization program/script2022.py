@@ -5,8 +5,8 @@ import math
 import gurobi_license
 
 # Setting up the initial date limit
-start_date = pd.Timestamp('2023-01-01')  # Start at Jan 2023 (will use Dec 2022 data)
-end_date = pd.Timestamp('2023-12-31')  # End of Dec 2023
+start_date = pd.Timestamp('2022-01-01')  # Start at Jan 2023 (will use Dec 2022 data)
+end_date = pd.Timestamp('2022-12-31')  # End of Dec 2023
 
 # Load the data
 df = pd.read_csv('raw.csv', parse_dates=['date'])
@@ -19,6 +19,7 @@ current_date = start_date
 
 # Adding 180 and 365 data points to the options
 lookback_days_options = [30, 60, 90, 180, 365]
+# lookback_days_options = [30]
 
 for lookback_days in lookback_days_options:
     results = []
@@ -177,7 +178,7 @@ for lookback_days in lookback_days_options:
     # Convert results into a DataFrame and format the allocations for easier viewing
     results_df = pd.DataFrame(results)
     results_df['allocations'] = results_df['allocations'].apply(lambda x: ', '.join([f'{k}: {v:.2f}%' for k, v in x.items()]))
-    results_df.to_csv(f'optimized_portfolio_monthlyrebalance_{lookback_days}datapoints.csv', index=False)
+    results_df.to_csv(f'optimization_result/2022_monthly/2022_optimized_portfolio_monthlyrebalance_{lookback_days}datapoints.csv', index=False)
 
 
 # Print the final results
