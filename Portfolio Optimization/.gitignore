@@ -1,0 +1,9 @@
+data/cache/*
+data/raw/*
+data/processed/*
+__pycache__/
+*.pyc
+.env
+.idea/
+venv/
+*.pkl
