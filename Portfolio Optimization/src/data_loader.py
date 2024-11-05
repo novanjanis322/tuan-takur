@@ -2,10 +2,9 @@ from google.cloud import bigquery
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from pathlib import Path
-from typing import Dict, Optional, Any
+from typing import Optional
 
 import pandas as pd
-import pickle
 
 from .settings import RAW_DATA_DIR
 
@@ -34,34 +33,31 @@ class DataLoader:
         """
         if not start_date:
             raise ValueError("start_date cannot be None or empty")
-        return self.cache_dir / f"stock_data_{start_date}.pkl"
+        return self.cache_dir / f"stock_data_{start_date}.csv"
 
-    def _save_to_cache(self, data_dict: Dict[str, Any], start_date: str) -> None:
+    def _save_to_cache(self, df: pd.DataFrame, start_date: str) -> None:
         """Save data to cache file
         Args:
-            data_dict (Dict[str, Any]): Dictionary containing data to save
+            df (pd.DataFrame): DataFrame saved into cache
             start_date (str): Date string in 'YYYY-MM-DD' format
         Returns:
             None
         """
         cache_path = self._get_cache_path(start_date)
-        with open(cache_path, 'wb') as f:
-            pickle.dump(data_dict, f)
+        df.to_csv(cache_path, index=False)
 
-    def _load_from_cache(self, start_date: str) -> Optional[Dict[str, Any]]:
+    def _load_from_cache(self, start_date: str) -> Optional[pd.DataFrame]:
         """
         Load data from cache if it exists
         Args:
             start_date (str): Date string in 'YYYY-MM-DD' format
-
         Returns:
-            Optional[Dict[str, Any]]: Dictionary containing cached data or None if not found
+            Optional[pd.DataFrame]: DataFrame loaded from cache or None if not found
 
         """
         cache_path = self._get_cache_path(start_date)
         if cache_path.exists():
-            with open(cache_path, 'rb') as f:
-                return pickle.load(f)
+            return pd.read_csv(cache_path)
         return None
 
     def load_stock_data(self, start_date: str) -> pd.DataFrame:
@@ -86,7 +82,7 @@ class DataLoader:
         cached_data = self._load_from_cache(start_date)
         if cached_data is not None:
             print("Loading data from cache...")
-            return cached_data['stock_data']
+            return cached_data
 
         print("Querying fresh data from BigQuery...")
         # If not in cache, query from BigQuery
@@ -122,7 +118,7 @@ class DataLoader:
         df["adj_close"] = df["adj_close"].astype(float)
 
         # Save to cache
-        self._save_to_cache({'stock_data': df, 'query_date': start_date}, start_date)
+        self._save_to_cache(df, start_date)
 
         return df
 
@@ -138,13 +134,12 @@ class DataLoader:
         Raises:
             Exception: If there's an error querying BigQuery or processing data
         """
-        cache_path = self.cache_dir / "industry_data.pkl"
+        cache_path = self.cache_dir / "industry_data.csv"
 
         # Try to load from cache
         if cache_path.exists():
             print("Loading industry data from cache...")
-            with open(cache_path, 'rb') as f:
-                return pickle.load(f)
+            return pd.read_csv(cache_path)
 
         print("Querying industry data from BigQuery...")
         query = """
@@ -157,8 +152,7 @@ class DataLoader:
         df = self.client.query(query).to_dataframe()
 
         # Save to cache
-        with open(cache_path, 'wb') as f:
-            pickle.dump(df, f)
+        df.to_csv(cache_path, index=False)
 
         return df
 
@@ -175,13 +169,12 @@ class DataLoader:
             FileNotFoundError: If benchmark CSV file is not found
             Exception: If there's an error processing the benchmark data
         """
-        cache_path = self.cache_dir / "benchmark_data.pkl"
+        cache_path = self.cache_dir / "benchmark_data.csv"
 
         # Try to load from cache
         if cache_path.exists():
             print("Loading benchmark data from cache...")
-            with open(cache_path, 'rb') as f:
-                return pickle.load(f)
+            return pd.read_csv(cache_path)
 
         print("Loading benchmark data from CSV...")
         try:
@@ -207,8 +200,7 @@ class DataLoader:
                 df['Price'] = df['Price'].str.replace(',', '').astype(float)
 
             # Save to cache
-            with open(cache_path, 'wb') as f:
-                pickle.dump(df, f)
+            df.to_csv(cache_path, index=False)
 
             return df
         except Exception as e:
