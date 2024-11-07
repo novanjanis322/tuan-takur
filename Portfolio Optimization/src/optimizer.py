@@ -1,6 +1,6 @@
 import gurobipy as gp
-import pandas as pd
 import os
+import pandas as pd
 from typing import Optional, Union
 from datetime import datetime, date
 from dateutil.relativedelta import relativedelta
@@ -27,6 +27,7 @@ class PortfolioOptimizer:
             self.start_date = start_date.strftime('%Y-%m-%d')
         else:
             self.start_date = start_date
+        self.static_start_date = self.start_date
 
         # Calculate last date
         start_dt = datetime.strptime(self.start_date, '%Y-%m-%d')
@@ -153,6 +154,7 @@ class PortfolioOptimizer:
             # Handle portfolio data
             self.monthly_return_list = _df["monthly_return (%)"].tolist()
             self.monthly_return_ticker = _df["ticker"].tolist()
+            print(_df)
             self.pnl_backtesting = _df
         else:
             # Handle benchmark data
@@ -301,7 +303,7 @@ class PortfolioOptimizer:
         positive_returns = monthly_metrics[monthly_metrics["monthly_return (%)"] > 0]
         stock_names = monthly_metrics["ticker"].tolist()
         stock_returns = monthly_metrics["monthly_return (%)"].tolist()
-
+        print(monthly_metrics)
         self.monthly_metrics_df = monthly_metrics
         self.positive_returns = positive_returns
         self.stock_names = stock_names
@@ -501,7 +503,6 @@ class PortfolioOptimizer:
             [self.optimized_portfolio, self.benchmark_pnl_backtesting_df],
             ignore_index=True,
         )
-
     def find_tickers(self, find_date: str) -> Optional[pd.DataFrame]:
         """
         Find portfolio allocations for a specific date.

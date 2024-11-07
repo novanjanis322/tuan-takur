@@ -3,3 +3,5 @@ gurobipy
 google-cloud-bigquery
 python-dateutil
 python-dotenv
+fastapi
+pydantic

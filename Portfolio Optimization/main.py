@@ -1,10 +1,13 @@
 import logging
 import argparse
-from src.optimizer import run_optimization_pipeline
-from typing import Tuple, Optional
-from src.settings import PROCESSED_DATA_DIR
-from src.utils.validators import validate_start_date, validate_granularity
 
+from src.optimizer import run_optimization_pipeline
+from typing import Tuple
+from src.settings import PROCESSED_DATA_DIR
+from src.utils.validators import dateUtil
+from datetime import datetime
+import uuid
+    
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
@@ -50,13 +53,13 @@ def get_user_inputs() -> Tuple[str, int]:
         while True:
             try:
                 start_date = input("Enter start date (YYYY-MM-DD): ")
-                start_date = validate_start_date(start_date)
+                start_date = dateUtil.validate_start_date(start_date)
                 break
             except ValueError as e:
                 print(f"Error: {str(e)}")
                 print("Please try again.")
     else:
-        start_date = validate_start_date(args.start_date)
+        start_date = dateUtil.validate_start_date(args.start_date)
 
     # Get and validate granularity
     if args.granularity is None:
@@ -66,14 +69,14 @@ def get_user_inputs() -> Tuple[str, int]:
                 if granularity_input == "":
                     granularity = 30
                     break
-                granularity = validate_granularity(granularity_input)
+                granularity = dateUtil.validate_granularity(granularity_input)
                 break
             except ValueError as e:
                 print(f"Error: {str(e)}")
                 print("Please try again.")
     else:
         try:
-            granularity = validate_granularity(args.granularity)
+            granularity = dateUtil.validate_granularity(args.granularity)
         except ValueError as e:
             logger.warning(f"Invalid granularity provided: {str(e)}")
             logger.info("Using default granularity of 30 days")
@@ -114,19 +117,69 @@ def main() -> None:
             start_date=start_date
         )
 
-        # Save results
-        results_df = optimizer.final_result
-        output_path = PROCESSED_DATA_DIR / f"optimization_results_from_{start_date}_with_{granularity}_datapoints.csv"
-        results_df.to_csv(output_path, index=False)
+        current_timestamp = datetime.now()
+        output_path = PROCESSED_DATA_DIR / f"optimization_metadata_from_{start_date}_with_{granularity}_datapoints.csv"
+        # results_df.to_csv(output_path, index=False)
+        # logger.info(f"Optimization completed successfully. Results saved to {output_path}")
+        # Get results DataFrame
 
-        logger.info(f"Optimization completed successfully. Results saved to {output_path}")
+        # Add metadata columns directly to results_df
+        results_df = optimizer.final_result
+        current_period = results_df['period'].max()
+        current_allocations = results_df[
+            (results_df['period'] == current_period) &
+            (results_df['ticker'] != 'LQ45')
+            ]
+
+        # Prepare portfolio recommendations
+        portfolio_recommendations = [
+            {
+                "ticker": row['ticker'],
+                "allocation_percentage": round(row['allocations'] * 100, 2)
+            }
+            for _, row in current_allocations.iterrows()
+        ]
+
+        # Create base record
+        allocation_array = []
+        for period, group in results_df.groupby('period'):
+            allocation_details = [
+                {
+                    "ticker": row['ticker'],
+                    "allocation_percentage": round(row['allocations'] * 100, 2)
+                }
+                for _, row in group.iterrows() if row['ticker'] != 'LQ45'
+            ]
+
+            period_struct = {
+                "period": period,
+                "allocation_detail": allocation_details
+            }
+            allocation_array.append(period_struct)
+
+        # Prepare the main data record as a dictionary
+        data = {
+            'generation_id': str(uuid.uuid4()),
+            'user_id': 'tes',
+            'starting_date': datetime.strptime(start_date, '%Y-%m-%d').date(),
+            'datapoints': granularity,
+            'created_at': current_timestamp,
+            'allocation': allocation_array  # Directly use the list of dictionaries
+        }
+
+        # Print or use the dictionary as needed
+        print(data)
+
+        # logger.info(f"Optimization completed successfully. Results saved to {output_path}")
+        # Verify the columns are in the correct format
+        # print("DataFrame columns:", final_df.columns.tolist())
+        # print("Sample row:", final_df.iloc[0].to_dict())
 
         # Print summary statistics
-        print("\nOptimization Summary:")
-        print("-" * 50)
-        print(f"Total periods processed: {len(results_df['period'].unique())}")
-        print(f"Average number of stocks per period: "
-              f"{results_df.groupby('period')['ticker'].count().mean():.2f}")
+        # print("\nOptimization Summary:")
+        # print("-" * 50)
+        # print(f"Average number of stocks per period: "
+        #       f"{results_df.groupby('period')['ticker'].count().mean():.2f}")
 
     except Exception as e:
         logger.error(f"Error during optimization: {str(e)}", exc_info=True)

@@ -8,6 +8,7 @@ import pandas as pd
 
 from .settings import RAW_DATA_DIR
 
+
 class DataLoader:
     def __init__(self, cache_dir: Path = Path('data/cache')):
         """
@@ -92,7 +93,8 @@ class DataLoader:
         query = f"""
           WITH get_data AS (
             SELECT
-              *
+              *,
+              ROW_NUMBER() OVER (PARTITION BY ticker, DATE_TRUNC(`date`, MONTH) ORDER BY `date`) AS row_num
             FROM
               km-data-dev.L0_yahoofinance.adj_close_price
             WHERE
@@ -106,11 +108,11 @@ class DataLoader:
           FROM
             get_data
           QUALIFY
-            adj_close != LAG(adj_close) OVER (
-            PARTITION BY ticker ORDER BY `date`
+            row_num = 1 OR adj_close != LAG(adj_close) OVER (
+              PARTITION BY ticker ORDER BY `date`
             )
           ORDER BY
-            ticker, date ASC
+            ticker, date ASC;
           """
         df = self.client.query(query).to_dataframe()
         df["date"] = pd.to_datetime(df["date"])
