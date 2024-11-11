@@ -1,30 +1,26 @@
-FROM python:3.9-slim
-FROM gurobi/python:latest
-
+FROM python:3.11-slim AS build-env
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
+# Install UV
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
-# Create necessary directories
-RUN mkdir -p /app/data/raw /app/data/processed /app/data/cache
+# Copy your application files
+COPY app.py .
+COPY src/ src/
+COPY pyproject.toml .
+COPY uv.lock .
+# Create virtual environment and sync dependencies with UV
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+RUN uv sync --frozen --no-cache
 
-# Copy requirements first
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+FROM gcr.io/distroless/python3
+WORKDIR /app
 
-# Copy the application code
-COPY src/ ./src/
-COPY data/raw/LQ45_benchmark.csv ./data/raw/
+COPY --from=build-env /opt/venv /opt/venv
+COPY --from=build-env /app /app
 
-# Set environment variables
-ENV PYTHONPATH=/app
-ENV PYTHONUNBUFFERED=1
+ENV PATH="/opt/venv/bin:$PATH"
+ENV PYTHONPATH="/app/.venv/lib/python3.11/site-packages:/app"
 
-# Expose port
-EXPOSE 8000
-
-# Run the web service using Granian
-CMD exec granian --interface asgi --host 0.0.0.0 --port $PORT --workers 1 src.app:app
+ENTRYPOINT ["/usr/bin/python3.11", "/app/app.py"]

@@ -16,7 +16,7 @@ PROCESSED_DATA_DIR.mkdir(parents=True, exist_ok=True)
 # Gurobi credentials
 WLS_ACCESS_ID = os.getenv("WLS_ACCESS_ID")
 WLS_SECRET = os.getenv("WLS_SECRET")
-LICENSE_ID = int(os.getenv("LICENSE_ID"))
+LICENSE_ID = os.getenv("LICENSE_ID")
 
 # Default optimization parameters
 INITIAL_CAPITAL = 100_000_000

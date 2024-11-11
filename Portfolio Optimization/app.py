@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+from google.cloud import bigquery
 import asyncio
 from asyncio import Semaphore
 from concurrent.futures.thread import ThreadPoolExecutor
@@ -6,14 +8,14 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Depends, Security, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from granian.constants import Interfaces
 from pydantic import BaseModel, field_validator
 from typing import Dict, Any, List, Optional
-from google.cloud import bigquery
 from google.api_core import retry
 import uuid
 import os
 import pytz
-
+import granian
 
 from src.optimizer import run_optimization_pipeline
 from src.utils.validators import *
@@ -143,6 +145,7 @@ thread_pool = ThreadPoolExecutor(max_workers=1)
 
 gurobi_semaphore = Semaphore(1)
 
+
 async def run_optimization_task(
         job_id: str,
         request: OptimizationRequest,
@@ -250,6 +253,7 @@ async def run_optimization_task(
             schema=schema,
             write_disposition="WRITE_APPEND"
         )
+
         @retry.Retry(
             initial=1.0,  # Initial delay in seconds
             maximum=60.0,  # Maximum delay
@@ -391,3 +395,12 @@ async def health_check(authenticated: bool = Depends(verify_token)) -> Dict[str,
         'status': 'healthy',
         'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     }
+
+
+if __name__ == "__main__":
+    granian.Granian(
+        target=app,
+        address="0.0.0.0",
+        port=8010,
+        interface=Interfaces.ASGI,
+    )

@@ -8,7 +8,7 @@ from gurobipy import GRB, quicksum
 from dotenv import load_dotenv
 
 from .data_loader import DataLoader
-from .settings import INITIAL_CAPITAL
+from .settings import *
 
 
 class PortfolioOptimizer:
@@ -16,9 +16,9 @@ class PortfolioOptimizer:
         load_dotenv()
 
         # Initialize Gurobi credentials
-        self.WLSACCESSID = os.getenv("WLS_ACCESS_ID")
-        self.WLSSECRET = os.getenv("WLS_SECRET")
-        self.LICENSEID = int(os.getenv("LICENSE_ID"))
+        self.WLSACCESSID = WLS_ACCESS_ID
+        self.WLSSECRET = WLS_SECRET
+        self.LICENSEID = LICENSE_ID
 
         self.granularity = granularity
 
