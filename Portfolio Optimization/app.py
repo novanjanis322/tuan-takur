@@ -1,13 +1,8 @@
-# -*- coding: utf-8 -*-
 from google.cloud import bigquery
-import asyncio
-from asyncio import Semaphore
-from concurrent.futures.thread import ThreadPoolExecutor
-from enum import Enum
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Depends, Security, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, Header
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPBearer
 from granian.constants import Interfaces
 from pydantic import BaseModel, field_validator
 from typing import Dict, Any, List, Optional
@@ -16,6 +11,7 @@ import uuid
 import os
 import pytz
 import granian
+
 
 from src.optimizer import run_optimization_pipeline
 from src.utils.validators import *
@@ -49,8 +45,10 @@ app.add_middleware(
 # Initialize BigQuery client
 client = bigquery.Client()
 
+# Store for optimization results
+optimization_results = {}
 
-# Pydantic models for request/response
+
 class OptimizationRequest(BaseModel):
     start_date: str
     granularity: int
@@ -77,101 +75,105 @@ class PortfolioAllocation(BaseModel):
 
 
 class OptimizationResponse(BaseModel):
+    task_id: str
     status: str
     message: str
-    optimization_id: str
-    portfolio_recommendation: List[PortfolioAllocation]
-    metadata: Dict[str, Any]
 
 
-class HealthResponse(BaseModel):
+class OptimizationResult(BaseModel):
     status: str
-    timestamp: str
+    message: str
+    portfolio_recommendation: Optional[List[PortfolioAllocation]] = None
+    metadata: Optional[Dict[str, Any]] = None
 
 
-async def verify_token(credentials: HTTPAuthorizationCredentials = Security(security)) -> str:
+def get_latest_allocation(generation_id: str) -> Dict[str, Any]:
     """
-    Verify the Bearer token from the request header.
-
-    Args:
-        credentials: Bearer token credentials
-
-    Returns:
-        str: Token if valid
-
-    Raises:
-        HTTPException: If token is invalid
+    Get the latest allocation for a specific generation_id from BigQuery
     """
+    query = f"""
+    WITH latest_allocation AS (
+        SELECT 
+            generation_id,
+            user_id,
+            starting_date,
+            datapoints,
+            created_at,
+            allocation
+        FROM `km-data-dev.tuan_takur.user_generated_optimization`
+        WHERE generation_id = '{generation_id}'
+    )
+    SELECT *
+    FROM latest_allocation
+    """
+
     try:
-        token = credentials.credentials
-        if token != API_KEY:
-            raise HTTPException(
-                status_code=401,
-                detail="Invalid authentication token"
-            )
-        return token
-    except Exception:
+        # Remove the job_config since we're using f-string
+        query_job = client.query(query)
+        results = query_job.result()
+
+        # Convert results to list to check if empty
+        rows = list(results)
+        if not rows:
+            print(f"No results found for generation_id: {generation_id}")  # For debugging
+            return None
+
+        row = rows[0]  # Get the first row
+
+        # Debug print the row data
+        print(f"Found data: {row}")  # For debugging
+
+        # Get the last period's allocation from the allocation array
+        allocation_array = row.allocation
+        if not allocation_array:
+            return None
+
+        latest_period = allocation_array[-1]
+
+        # Format the portfolio recommendations
+        portfolio_recommendations = [
+            {
+                "ticker": alloc["ticker"],
+                "allocation_percentage": alloc["allocation_percentage"]
+            }
+            for alloc in latest_period["allocation_detail"]
+        ]
+
+        return {
+            'status': 'success',
+            'message': 'Optimization completed successfully',
+            'portfolio_recommendation': portfolio_recommendations,
+            'metadata': {
+                'generation_id': row.generation_id,
+                'user_id': row.user_id,
+                'start_date': row.starting_date,
+                'datapoints': row.datapoints,
+                'created_at': row.created_at.strftime('%Y-%m-%d %H:%M:%S')
+            }
+        }
+
+    except Exception as e:
+        print(f"Error in get_latest_allocation: {str(e)}")  # For debugging
         raise HTTPException(
-            status_code=401,
-            detail="Invalid authentication credentials"
+            status_code=500,
+            detail=f"Error retrieving results from BigQuery: {str(e)}"
         )
 
 
-class JobStatus(str, Enum):
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-
-
-class JobResponse(BaseModel):
-    job_id: str
-    status: JobStatus
-    message: str
-
-
-class JobStatusResponse(BaseModel):
-    job_id: str
-    status: JobStatus
-    message: str
-    result: Optional[Dict[str, Any]] = None
-
-
-# In-memory job storage (replace with Redis/database in production)
-job_store = {}
-
-# Create a thread pool executor for running CPU-intensive tasks
-thread_pool = ThreadPoolExecutor(max_workers=1)
-
-gurobi_semaphore = Semaphore(1)
-
-
-async def run_optimization_task(
-        job_id: str,
+def run_optimization_task(
+        task_id: str,
         request: OptimizationRequest,
-        client: bigquery.Client
 ) -> None:
     """
-    Run portfolio optimization in the background.
-
-    Args:
-        job_id (str): Job ID
-        request (OptimizationRequest): Optimization request
-        client (bigquery.Client): BigQuery client
-
-    Returns:
-        None
+    Run the optimization task and store results
     """
     try:
-        job_store[job_id]["status"] = JobStatus.RUNNING
-        job_store[job_id]["message"] = "Optimization in progress"
-
-        optimizer = await asyncio.get_event_loop().run_in_executor(
-            thread_pool,
-            run_optimization_pipeline,
+        # Run optimization
+        optimizer = run_optimization_pipeline(
             request.granularity,
             request.start_date
         )
+
         results_df = optimizer.final_result
         current_period = results_df['period'].max()
         current_allocations = results_df[
@@ -188,7 +190,7 @@ async def run_optimization_task(
             for _, row in current_allocations.iterrows()
         ]
 
-        # Create base record
+        # Prepare data for BigQuery
         allocation_array = []
         for period, group in results_df.groupby('period'):
             allocation_details = [
@@ -203,16 +205,31 @@ async def run_optimization_task(
                 for _, row in group.iterrows() if row['ticker'] != 'LQ45'
             ]
 
-            period_struct = {
+            allocation_array.append({
                 "period": period,
                 "allocation_detail": allocation_details
-            }
-            allocation_array.append(period_struct)
+            })
 
         wib = pytz.timezone('Asia/Jakarta')
         current_timestamp = datetime.now(wib)
+
+        # Store results
+        optimization_results[task_id] = {
+            'status': 'success',
+            'message': 'Optimization completed successfully',
+            'portfolio_recommendation': portfolio_recommendations,
+            'metadata': {
+                'generation_id': task_id,
+                'user_id': request.user_id,
+                'start_date': request.start_date,
+                'datapoints': request.granularity,
+                'created_at': current_timestamp.strftime('%Y-%m-%d %H:%M:%S')
+            }
+        }
+
+        # Prepare data for BigQuery
         data = [{
-            'generation_id': job_id,
+            'generation_id': task_id,
             'user_id': request.user_id,
             'starting_date': request.start_date,
             'datapoints': request.granularity,
@@ -220,6 +237,7 @@ async def run_optimization_task(
             'allocation': allocation_array
         }]
 
+        # Save to BigQuery
         schema = [
             bigquery.SchemaField("generation_id", "STRING", mode="REQUIRED"),
             bigquery.SchemaField("user_id", "STRING", mode="REQUIRED"),
@@ -248,6 +266,7 @@ async def run_optimization_task(
                 ]
             )
         ]
+
         table_id = 'km-data-dev.tuan_takur.user_generated_optimization'
         job_config = bigquery.LoadJobConfig(
             schema=schema,
@@ -255,93 +274,63 @@ async def run_optimization_task(
         )
 
         @retry.Retry(
-            initial=1.0,  # Initial delay in seconds
-            maximum=60.0,  # Maximum delay
-            multiplier=2.0,  # Multiply delay by this factor after each failure
+            initial=1.0,
+            maximum=60.0,
+            multiplier=2.0,
             predicate=retry.if_exception_type(Exception),
-            timeout=600.0  # Total timeout in seconds
+            timeout=600.0
         )
         def execute_bigquery_job():
             job = client.load_table_from_json(data, table_id, job_config=job_config)
             return job.result()
 
-        # Execute with retry
-        await asyncio.get_event_loop().run_in_executor(
-            thread_pool,
-            execute_bigquery_job
-        )
+        execute_bigquery_job()
 
-        # Update job store with results
-        result = {
-            'status': 'success',
-            'message': 'Optimization completed and results stored',
-            'optimization_id': job_id,
-            'portfolio_recommendation': portfolio_recommendations,
-            'metadata': {
-                'generation_id': job_id,
-                'user_id': request.user_id,
-                'start_date': request.start_date,
-                'datapoints': request.granularity,
-                'created_at': current_timestamp.strftime('%Y-%m-%d %H:%M:%S')
-            }
+    except Exception as e:
+        optimization_results[task_id] = {
+            'status': 'error',
+            'message': str(e)
         }
 
-        job_store[job_id].update({
-            "status": JobStatus.COMPLETED,
-            "message": "Optimization completed successfully",
-            "result": result
-        })
-    except Exception as e:
-        job_store[job_id].update({
-            "status": JobStatus.FAILED,
-            "message": f"optimization failed: {str(e)}"
-        })
 
+async def verify_token(x_api_key: str = Header(None, alias="X-API-key")) -> str:
+    """Verify the Bearer token from the request header."""
+    if x_api_key != API_KEY:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid Token Bearer key"
+        )
+    return x_api_key
 
 @app.get("/")
-async def read_root():
-    return {"message": "Welcome to the Portfolio Optimization API"}
+def read_root():
+    return {"Status": "OK",
+            "Message": "Welcome to Portfolio Optimization API"
+    }
 
-
-@app.post("/optimize", response_model=JobResponse)
-async def optimize(
+@app.post("/optimize", response_model=OptimizationResponse)
+def optimize(
         request: OptimizationRequest,
         background_tasks: BackgroundTasks,
-        authenticated: bool = Depends(verify_token)
+        api_key: str = Depends(verify_token)
 ) -> Dict[str, Any]:
-    """
-    Start portfolio optimization in background
-
-    Args:
-        request (OptimizationRequest): Request containing start_date and granularity
-        authenticated (bool): Flag indicating if user is authenticated
-        background_tasks (BackgroundTasks): Background task manager
-
-    Returns:
-        Dict[str, Any]: Job ID, status, and message
-
-    Raises:
-        HTTPException: If optimization fails
-    """
-    if not authenticated:
-        raise HTTPException(status_code=401, detail="Authentication required")
-
+    """Start portfolio optimization"""
     try:
-        job_id = str(uuid.uuid4())
-        job_store[job_id] = {
-            "status": JobStatus.PENDING,
-            "message": "Optimization is queued"
+        task_id = str(uuid.uuid4())
+        optimization_results[task_id] = {
+            'status': 'processing',
+            'message': 'Optimization in progress'
         }
 
         background_tasks.add_task(
             run_optimization_task,
-            job_id,
-            request,
-            client
+            task_id,
+            request
         )
+
         return {
-            "job_id": job_id,
-            "status": JobStatus.PENDING,
+            "task_id": task_id,
+            "status": "processing",
             "message": "Optimization started"
         }
 
@@ -349,48 +338,27 @@ async def optimize(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@app.get("/optimize/status/{job_id}", response_model=JobStatusResponse)
-async def get_optimization_status(
-        job_id: str,
-        authenticated: bool = Depends(verify_token)
+@app.get("/optimizers/{task_id}", response_model=OptimizationResult)
+def get_optimization_result(
+        task_id: str,
+        api_key: str = Depends(verify_token)
 ) -> Dict[str, Any]:
-    """
-    Get optimization status by job ID
+    """Get optimization results from BigQuery"""
+    print(f"Received request for task_id: {task_id}")  # Debug log
 
-    Args:
-        job_id (str): Job ID
-        authenticated (bool): Flag indicating if user is authenticated
+    result = get_latest_allocation(task_id)
+    print(f"Query result: {result}")  # Debug log
 
-    Returns:
-        Dict[str, Any]: Job status and message
+    if not result:
+        print(f"No result found for task_id: {task_id}")  # Debug log
+        raise HTTPException(status_code=404, detail="Task not found")
 
-    Raises:
-        HTTPException: If job ID is not found
-    """
-    if not authenticated:
-        raise HTTPException(status_code=401, detail="Authentication required")
-
-    if job_id not in job_store:
-        raise HTTPException(status_code=404, detail="Job ID not found")
-
-    job_info = job_store[job_id]
-    if not job_info:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Job {job_id} not found"
-        )
-
-    return {
-        "job_id": job_id,
-        **job_info
-    }
+    return result
 
 
-@app.get("/health", response_model=HealthResponse)
-async def health_check(authenticated: bool = Depends(verify_token)) -> Dict[str, str]:
+@app.get("/health")
+def health_check(api_key: str = Depends(verify_token)) -> Dict[str, str]:
     """Health check endpoint"""
-    if not authenticated:
-        raise HTTPException(status_code=401, detail="Authentication required")
     return {
         'status': 'healthy',
         'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -399,8 +367,9 @@ async def health_check(authenticated: bool = Depends(verify_token)) -> Dict[str,
 
 if __name__ == "__main__":
     granian.Granian(
-        target=app,
+        target="app:app",
         address="0.0.0.0",
-        port=8010,
+        port=8080,
         interface=Interfaces.ASGI,
-    )
+        workers=2,
+    ).serve()
