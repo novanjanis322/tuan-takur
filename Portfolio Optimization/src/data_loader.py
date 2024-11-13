@@ -3,11 +3,13 @@ from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from pathlib import Path
 from typing import Optional
-
+import logging
 import pandas as pd
 
 from .settings import RAW_DATA_DIR
 
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class DataLoader:
     def __init__(self, cache_dir: Path = Path('data/cache')):
@@ -18,9 +20,11 @@ class DataLoader:
             cache_dir (Path, optional): Directory for caching data.
                 Defaults to 'data/cache'.
         """
+        logger.info(f"Initializing DataLoader with cache directory: {cache_dir}")
         self.client = bigquery.Client()
         self.cache_dir = cache_dir
         self.cache_dir.mkdir(parents=True, exist_ok=True)
+        logger.info("DataLoader initialization complete")
 
     def _get_cache_path(self, start_date: str) -> Path:
         """
@@ -33,8 +37,11 @@ class DataLoader:
             Path: Path object pointing to the cache file
         """
         if not start_date:
+            logger.error("start_date cannot be None or empty")
             raise ValueError("start_date cannot be None or empty")
-        return self.cache_dir / f"stock_data_{start_date}.csv"
+        cache_path = self.cache_dir / f"stock_data_{start_date}.csv"
+        logger.debug(f"Generated cache path: {cache_path}")
+        return cache_path
 
     def _save_to_cache(self, df: pd.DataFrame, start_date: str) -> None:
         """Save data to cache file
@@ -45,7 +52,11 @@ class DataLoader:
             None
         """
         cache_path = self._get_cache_path(start_date)
+        logger.info(f"Saving data to cache: {cache_path}")
+        logger.debug(f"DataFrame shape being cached: {df.shape}")
         df.to_csv(cache_path, index=False)
+        logger.info("Data successfully saved to cache")
+
 
     def _load_from_cache(self, start_date: str) -> Optional[pd.DataFrame]:
         """
@@ -58,7 +69,11 @@ class DataLoader:
         """
         cache_path = self._get_cache_path(start_date)
         if cache_path.exists():
-            return pd.read_csv(cache_path)
+            logger.info(f"Loading data from cache: {cache_path}")
+            df = pd.read_csv(cache_path)
+            logger.debug(f"Loaded DataFrame shape: {df.shape}")
+            return df
+        logger.info(f"Cache not found at: {cache_path}")
         return None
 
     def load_stock_data(self, start_date: str) -> pd.DataFrame:
@@ -77,19 +92,20 @@ class DataLoader:
         Raises:
             Exception: If there's an error querying BigQuery or processing data
         """
+        logger.info(f"Loading stock data for start_date: {start_date}")
         if not start_date:
+            logger.error("start_date cannot be None or empty")
             raise ValueError("start_date cannot be None or empty")
-        # Try to load from cache first
+
         cached_data = self._load_from_cache(start_date)
         if cached_data is not None:
-            print("Loading data from cache...")
+            logger.info("Using cached stock data")
             return cached_data
 
-        print("Querying fresh data from BigQuery...")
-        # If not in cache, query from BigQuery
+        logger.info("Cache miss - querying fresh data from BigQuery")
         start_dt = datetime.strptime(start_date, '%Y-%m-%d')
         date_query = (start_dt - relativedelta(years=2)).strftime('%Y-%m-%d')
-
+        logger.debug(f"Query date range: {date_query} to current")
         query = f"""
           WITH get_data AS (
             SELECT
@@ -114,14 +130,17 @@ class DataLoader:
           ORDER BY
             ticker, date ASC;
           """
+        logger.debug("Executing BigQuery query")
         df = self.client.query(query).to_dataframe()
+        logger.info(f"Retrieved {len(df)} rows from BigQuery")
+
+        logger.debug("Processing date format")
         df["date"] = pd.to_datetime(df["date"])
         df["date"] = df["date"].dt.strftime('%Y-%m-%d')
         df["adj_close"] = df["adj_close"].astype(float)
+        logger.debug(f"Final DataFrame shape: {df.shape}")
 
-        # Save to cache
         self._save_to_cache(df, start_date)
-
         return df
 
     def load_industry_data(self) -> pd.DataFrame:
@@ -136,26 +155,28 @@ class DataLoader:
         Raises:
             Exception: If there's an error querying BigQuery or processing data
         """
+        logger.info("Loading industry data")
         cache_path = self.cache_dir / "industry_data.csv"
 
-        # Try to load from cache
         if cache_path.exists():
-            print("Loading industry data from cache...")
-            return pd.read_csv(cache_path)
+            logger.info("Loading industry data from cache")
+            df = pd.read_csv(cache_path)
+            logger.debug(f"Loaded industry data shape: {df.shape}")
+            return df
 
-        print("Querying industry data from BigQuery...")
+        logger.info("Cache miss - querying industry data from BigQuery")
         query = """
-          SELECT
-            ticker, industry
-          FROM
-            km-data-dev.L0_yahoofinance.info
-          group by ticker, industry
-          """
+                  SELECT
+                    ticker, industry
+                  FROM
+                    km-data-dev.L0_yahoofinance.info
+                  group by ticker, industry
+                  """
         df = self.client.query(query).to_dataframe()
+        logger.info(f"Retrieved {len(df)} industry records from BigQuery")
 
-        # Save to cache
+        logger.info("Saving industry data to cache")
         df.to_csv(cache_path, index=False)
-
         return df
 
     def load_benchmark_data(self) -> pd.DataFrame:
@@ -171,39 +192,49 @@ class DataLoader:
             FileNotFoundError: If benchmark CSV file is not found
             Exception: If there's an error processing the benchmark data
         """
+        logger.info("Loading benchmark data")
         cache_path = self.cache_dir / "benchmark_data.csv"
 
-        # Try to load from cache
         if cache_path.exists():
-            print("Loading benchmark data from cache...")
-            return pd.read_csv(cache_path)
+            logger.info("Loading benchmark data from cache")
+            df = pd.read_csv(cache_path)
+            logger.debug(f"Loaded benchmark data shape: {df.shape}")
+            return df
 
-        print("Loading benchmark data from CSV...")
+        logger.info("Cache miss - loading benchmark data from CSV")
         try:
             benchmark_path = RAW_DATA_DIR / "LQ45_benchmark.csv"
             if not benchmark_path.exists():
+                logger.error(f"Benchmark file not found: {benchmark_path}")
                 raise FileNotFoundError(f"Benchmark file not found at: {benchmark_path}")
 
+            logger.debug(f"Reading benchmark file: {benchmark_path}")
             df = pd.read_csv(benchmark_path)
+            logger.debug(f"Initial benchmark data shape: {df.shape}")
 
-            # Handle date formatting
             try:
+                logger.debug("Attempting to parse dates with format '%m/%d/%Y'")
                 df['Date'] = pd.to_datetime(df['Date'], format='%m/%d/%Y')
             except:
                 try:
+                    logger.debug("Attempting to parse dates with default format")
                     df['Date'] = pd.to_datetime(df['Date'])
                 except Exception as e:
+                    logger.error(f"Failed to parse dates: {str(e)}")
                     raise Exception(f"Could not parse dates in benchmark data: {str(e)}")
 
             df['Date'] = df['Date'].dt.strftime('%Y-%m-%d')
 
-            # Clean up Price column
             if df['Price'].dtype == object:
+                logger.debug("Converting Price column to float")
                 df['Price'] = df['Price'].str.replace(',', '').astype(float)
 
-            # Save to cache
+            logger.info("Saving benchmark data to cache")
             df.to_csv(cache_path, index=False)
+            logger.debug(f"Final benchmark data shape: {df.shape}")
 
             return df
         except Exception as e:
+            logger.error(f"Error loading benchmark data: {str(e)}", exc_info=True)
             raise Exception(f"Error loading benchmark data: {str(e)}")
+

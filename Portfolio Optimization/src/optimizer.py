@@ -1,11 +1,9 @@
 import gurobipy as gp
-import os
 import pandas as pd
 from typing import Optional, Union
 from datetime import datetime, date
 from dateutil.relativedelta import relativedelta
 from gurobipy import GRB, quicksum
-from dotenv import load_dotenv
 
 from .data_loader import DataLoader
 from .settings import *

@@ -11,12 +11,14 @@ import uuid
 import os
 import pytz
 import granian
-
+import logging
 
 from src.optimizer import run_optimization_pipeline
 from src.utils.validators import *
 
 load_dotenv()
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 # Get API key from environment variable
 API_KEY = os.getenv("API_KEY")
@@ -44,7 +46,6 @@ app.add_middleware(
 
 # Initialize BigQuery client
 client = bigquery.Client()
-
 # Store for optimization results
 optimization_results = {}
 
@@ -115,13 +116,13 @@ def get_latest_allocation(generation_id: str) -> Dict[str, Any]:
         # Convert results to list to check if empty
         rows = list(results)
         if not rows:
-            print(f"No results found for generation_id: {generation_id}")  # For debugging
+            print(f"No results found for generation_id: {generation_id}")
             return None
 
-        row = rows[0]  # Get the first row
+        row = rows[0]
 
         # Debug print the row data
-        print(f"Found data: {row}")  # For debugging
+        print(f"Found data: {row}")
 
         # Get the last period's allocation from the allocation array
         allocation_array = row.allocation
@@ -153,7 +154,7 @@ def get_latest_allocation(generation_id: str) -> Dict[str, Any]:
         }
 
     except Exception as e:
-        print(f"Error in get_latest_allocation: {str(e)}")  # For debugging
+        logger.error(f"Error retrieving results from BigQuery: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail=f"Error retrieving results from BigQuery: {str(e)}"
@@ -168,13 +169,14 @@ def run_optimization_task(
     Run the optimization task and store results
     """
     try:
-        # Run optimization
+        logger.info(f"Running optimization for task_id: {task_id}")
         optimizer = run_optimization_pipeline(
             request.granularity,
             request.start_date
         )
 
         results_df = optimizer.final_result
+        logger.info(f"Optimization completed successfully for task_id: {task_id}")
         current_period = results_df['period'].max()
         current_allocations = results_df[
             (results_df['period'] == current_period) &
@@ -223,7 +225,7 @@ def run_optimization_task(
                 'user_id': request.user_id,
                 'start_date': request.start_date,
                 'datapoints': request.granularity,
-                'created_at': current_timestamp.strftime('%Y-%m-%d %H:%M:%S')
+                'created_at': current_timestamp.isoformat()
             }
         }
 
@@ -238,6 +240,7 @@ def run_optimization_task(
         }]
 
         # Save to BigQuery
+        logger.info(f"Saving results to BigQuery for task_id: {task_id}")
         schema = [
             bigquery.SchemaField("generation_id", "STRING", mode="REQUIRED"),
             bigquery.SchemaField("user_id", "STRING", mode="REQUIRED"),
@@ -267,30 +270,53 @@ def run_optimization_task(
             )
         ]
 
-        table_id = 'km-data-dev.tuan_takur.user_generated_optimization'
-        job_config = bigquery.LoadJobConfig(
-            schema=schema,
-            write_disposition="WRITE_APPEND"
-        )
+        try:
+            table_id = 'km-data-dev.tuan_takur.user_generated_optimization'
+            try:
+                client.get_table(table_id)
+            except Exception as e:
+                logger.error(f"Table {table_id} is not found: {str(e)}")
+                raise Exception(f"Table {table_id} is not found: {str(e)}")
+            job_config = bigquery.LoadJobConfig(
+                schema=schema,
+                write_disposition="WRITE_APPEND",
+            )
 
-        @retry.Retry(
-            initial=1.0,
-            maximum=60.0,
-            multiplier=2.0,
-            predicate=retry.if_exception_type(Exception),
-            timeout=600.0
-        )
-        def execute_bigquery_job():
-            job = client.load_table_from_json(data, table_id, job_config=job_config)
-            return job.result()
+            @retry.Retry(
+                initial=1.0,
+                maximum=60.0,
+                multiplier=2.0,
+                predicate=retry.if_exception_type(Exception),
+                timeout=600.0
+            )
+            def execute_bigquery_job():
+                job = client.load_table_from_json(data, table_id, job_config=job_config)
+                return job.result()
 
-        execute_bigquery_job()
+            execute_bigquery_job()
+            logger.info(f"Results has been appended to BigQuery table for task_id: {task_id}")
+
+        except Exception as e:
+            logger.error(f"Error writing to BigQuery: {str(e)}", exc_info=True)
+            optimization_results[task_id] = {
+                'status': 'error',
+                'message': f"Error writing results to BigQuery: {str(e)}"
+            }
+            raise HTTPException(
+                status_code=500,
+                detail=str(e)
+            )
 
     except Exception as e:
+        logger.error(f"Error during optimization: {str(e)}", exc_info=True)
         optimization_results[task_id] = {
             'status': 'error',
             'message': str(e)
         }
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
 
 
 async def verify_token(x_api_key: str = Header(None, alias="X-API-key")) -> str:
@@ -302,11 +328,13 @@ async def verify_token(x_api_key: str = Header(None, alias="X-API-key")) -> str:
         )
     return x_api_key
 
+
 @app.get("/")
 def read_root():
     return {"Status": "OK",
             "Message": "Welcome to Portfolio Optimization API"
-    }
+            }
+
 
 @app.post("/optimize", response_model=OptimizationResponse)
 def optimize(
@@ -321,13 +349,13 @@ def optimize(
             'status': 'processing',
             'message': 'Optimization in progress'
         }
-
+        logger.info(
+            f"Optimization started for task_id: {task_id}, user_id: {request.user_id}, start_date: {request.start_date}, granularity: {request.granularity}")
         background_tasks.add_task(
             run_optimization_task,
             task_id,
             request
         )
-
         return {
             "task_id": task_id,
             "status": "processing",
@@ -335,6 +363,7 @@ def optimize(
         }
 
     except Exception as e:
+        logger.error(f"Error starting optimization: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -344,13 +373,13 @@ def get_optimization_result(
         api_key: str = Depends(verify_token)
 ) -> Dict[str, Any]:
     """Get optimization results from BigQuery"""
-    print(f"Received request for task_id: {task_id}")  # Debug log
+    print(f"Received request for task_id: {task_id}")
 
     result = get_latest_allocation(task_id)
-    print(f"Query result: {result}")  # Debug log
+    print(f"Query result: {result}")
 
     if not result:
-        print(f"No result found for task_id: {task_id}")  # Debug log
+        print(f"No result found for task_id: {task_id}")
         raise HTTPException(status_code=404, detail="Task not found")
 
     return result
@@ -359,9 +388,10 @@ def get_optimization_result(
 @app.get("/health")
 def health_check(api_key: str = Depends(verify_token)) -> Dict[str, str]:
     """Health check endpoint"""
+    WIB = pytz.timezone('Asia/Jakarta')
     return {
         'status': 'healthy',
-        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        'timestamp': datetime.now(WIB).strftime('%Y-%m-%d %H:%M:%S')
     }
 
 
