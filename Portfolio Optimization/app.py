@@ -1,5 +1,6 @@
 from google.cloud import bigquery
 from dotenv import load_dotenv
+from google.oauth2 import service_account
 from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer
@@ -22,6 +23,11 @@ logger = logging.getLogger(__name__)
 
 # Get API key from environment variable
 API_KEY = os.getenv("API_KEY")
+# credentials_path = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
+
+# Create credentials object
+# credentials = service_account.Credentials.from_service_account_file(credentials_path)
+# client = bigquery.Client(credentials=credentials)
 
 # Security scheme
 security = HTTPBearer()
@@ -332,7 +338,7 @@ async def verify_token(x_api_key: str = Header(None, alias="X-API-key")) -> str:
 @app.get("/")
 def read_root():
     return {"Status": "OK",
-            "Message": "Welcome to Portfolio Optimization API"
+            "Message": "Welcome to Portfolio Optimization API (24-11-14.02)"
             }
 
 
@@ -401,5 +407,6 @@ if __name__ == "__main__":
         address="0.0.0.0",
         port=8080,
         interface=Interfaces.ASGI,
-        workers=2,
+        # workers=4,
+        # threads=2
     ).serve()

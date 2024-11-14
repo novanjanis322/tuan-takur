@@ -4,10 +4,12 @@ from typing import Optional, Union
 from datetime import datetime, date
 from dateutil.relativedelta import relativedelta
 from gurobipy import GRB, quicksum
-
+import logging
 from .data_loader import DataLoader
 from .settings import *
 
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class PortfolioOptimizer:
     def __init__(self, granularity: int, start_date: Union[str, datetime, date]) -> None:
@@ -152,7 +154,6 @@ class PortfolioOptimizer:
             # Handle portfolio data
             self.monthly_return_list = _df["monthly_return (%)"].tolist()
             self.monthly_return_ticker = _df["ticker"].tolist()
-            print(_df)
             self.pnl_backtesting = _df
         else:
             # Handle benchmark data
@@ -301,7 +302,6 @@ class PortfolioOptimizer:
         positive_returns = monthly_metrics[monthly_metrics["monthly_return (%)"] > 0]
         stock_names = monthly_metrics["ticker"].tolist()
         stock_returns = monthly_metrics["monthly_return (%)"].tolist()
-        print(monthly_metrics)
         self.monthly_metrics_df = monthly_metrics
         self.positive_returns = positive_returns
         self.stock_names = stock_names
@@ -567,19 +567,36 @@ def run_optimization_pipeline(granularity: int, start_date: Optional[Union[str, 
     optimizer = PortfolioOptimizer(granularity, start_date)
     optimizer.load_data()
     optimizer.prepare_benchmark_data()
-
+    logger.info(f"loading data for {optimizer.start_date} has been completed")
+    logger.info(f"starting optimization process")
     while optimizer.start_date <= optimizer.end_date:
         print(f"\nRunning optimization for {optimizer.start_date}\n")
 
+        logger.info(f"prepare backtesting data for {optimizer.start_date}")
         optimizer.prepare_backtesting_data()
+
+        logger.info(f"performing pnl backtesting simulation for {optimizer.start_date}")
         optimizer.pnl_backtesting_simulation()
+
+        logger.info(f"prepare training data for {optimizer.start_date}")
         optimizer.prepare_training_data()
+
+        logger.info(f"calculate covariance matrix for {optimizer.start_date}")
         optimizer.calculate_cov_matrix()
+
+        logger.info(f"calculate metrics for {optimizer.start_date}")
         optimizer.calculate_metrics()
 
+        logger.info(f"setup gurobi environment for {optimizer.start_date}")
         optimizer.setup_gurobi_env()
+
+        logger.info(f"define optimization model for {optimizer.start_date}")
         optimizer.define_optimization_model()
+
+        logger.info(f"run optimization for {optimizer.start_date}")
         optimizer.run_optimization()
+
+        logger.info(f"optimization result for {optimizer.start_date}")
         optimizer.optimization_result()
 
         # Update dates for next iteration
@@ -591,6 +608,7 @@ def run_optimization_pipeline(granularity: int, start_date: Optional[Union[str, 
             datetime.strptime(optimizer.last_date, '%Y-%m-%d') +
             relativedelta(months=1)
         ).strftime('%Y-%m-%d')
+        logger.info(f"going to the next optimization date: {optimizer.start_date}")
 
     optimizer.backtesting_simulation()
     return optimizer
