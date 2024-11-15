@@ -302,6 +302,7 @@ class PortfolioOptimizer:
         positive_returns = monthly_metrics[monthly_metrics["monthly_return (%)"] > 0]
         stock_names = monthly_metrics["ticker"].tolist()
         stock_returns = monthly_metrics["monthly_return (%)"].tolist()
+        self.stock_industry = monthly_metrics["industry"].tolist()
         self.monthly_metrics_df = monthly_metrics
         self.positive_returns = positive_returns
         self.stock_names = stock_names
@@ -423,12 +424,17 @@ class PortfolioOptimizer:
                         ]
                     except:
                         pnl_percentage = 0
+                    try:
+                        industry = self.stock_industry[self.stock_names.index(stock)]
+                    except:
+                        industry = "Unknown"
 
                     new_rows.append(
                         {
                             "period": datetime.strptime(self.start_date, '%Y-%m-%d').strftime("%Y-%m"),
                             "datapoints": int(self.granularity),
                             "ticker": str(stock),
+                            "industry": str(industry),
                             "allocations": float(round(self.allocations[stock].X, 2)),
                             "pnl_percentage": float(round(pnl_percentage, 2)),
                         }

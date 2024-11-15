@@ -204,6 +204,7 @@ def run_optimization_task(
             allocation_details = [
                 {
                     "ticker": row['ticker'],
+                    "industry": row['industry'],
                     "allocation_percentage": round(row['allocations'] * 100, 2),
                     "allocation_idr": row['allocations_idr'],
                     "pnl_percentage": row['pnl_percentage'],
@@ -265,6 +266,7 @@ def run_optimization_task(
                         mode="REPEATED",
                         fields=[
                             bigquery.SchemaField("ticker", "STRING", mode="REQUIRED"),
+                            bigquery.SchemaField("industry", "STRING", mode="REQUIRED"),
                             bigquery.SchemaField("allocation_percentage", "FLOAT", mode="REQUIRED"),
                             bigquery.SchemaField("allocation_idr", "FLOAT", mode="REQUIRED"),
                             bigquery.SchemaField("pnl_percentage", "FLOAT", mode="REQUIRED"),
@@ -278,15 +280,13 @@ def run_optimization_task(
 
         try:
             table_id = 'km-data-dev.tuan_takur.user_generated_optimization'
-            try:
-                client.get_table(table_id)
-            except Exception as e:
-                logger.error(f"Table {table_id} is not found: {str(e)}")
-                raise Exception(f"Table {table_id} is not found: {str(e)}")
+            logger.info(f"table_id has been set {table_id}")
             job_config = bigquery.LoadJobConfig(
                 schema=schema,
-                write_disposition="WRITE_APPEND",
+                create_disposition="CREATE_NEVER",
+                write_disposition="WRITE_APPEND"
             )
+            logger.info(f"job_config has been set")
 
             @retry.Retry(
                 initial=1.0,
@@ -295,12 +295,13 @@ def run_optimization_task(
                 predicate=retry.if_exception_type(Exception),
                 timeout=600.0
             )
+
             def execute_bigquery_job():
                 job = client.load_table_from_json(data, table_id, job_config=job_config)
                 return job.result()
-
+            logger.info(f"executing_bigquery_job")
             execute_bigquery_job()
-            logger.info(f"Results has been appended to BigQuery table for task_id: {task_id}")
+            logger.info(f"Results have been appended to BigQuery table for task_id: {task_id}")
 
         except Exception as e:
             logger.error(f"Error writing to BigQuery: {str(e)}", exc_info=True)
@@ -338,7 +339,7 @@ async def verify_token(x_api_key: str = Header(None, alias="X-API-key")) -> str:
 @app.get("/")
 def read_root():
     return {"Status": "OK",
-            "Message": "Welcome to Portfolio Optimization API (24-11-14.02)"
+            "Message": "Welcome to Portfolio Optimization API (24-11-15.01)"
             }
 
 
