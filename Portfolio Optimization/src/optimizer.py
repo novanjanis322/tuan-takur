@@ -158,11 +158,12 @@ class PortfolioOptimizer:
         else:
             # Handle benchmark data
             _df['ticker'] = "LQ45"
+            _df['industry'] = "Benchmark"
             _df['period'] = _df['date'].dt.strftime('%Y-%m')
             _df['allocations'] = 1
             _df['datapoints'] = 0
             _df['pnl_percentage'] = _df['monthly_return (%)']
-            _df = _df[['period', 'datapoints', 'ticker', 'allocations', 'pnl_percentage']]
+            _df = _df[['period', 'datapoints', 'ticker', 'industry', 'allocations', 'pnl_percentage']]
             return _df
 
     def prepare_benchmark_data(self) -> None:

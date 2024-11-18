@@ -211,7 +211,7 @@ def run_optimization_task(
                     "pnl_idr": row['pnl_idr'],
                     "end_of_period_value": row['end_of_period_value'],
                 }
-                for _, row in group.iterrows() if row['ticker'] != 'LQ45'
+                for _, row in group.iterrows()
             ]
 
             allocation_array.append({
