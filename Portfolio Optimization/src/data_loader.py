@@ -1,10 +1,11 @@
+import logging
+import pandas as pd
+import yfinance as yf
 from google.cloud import bigquery
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from pathlib import Path
 from typing import Optional
-import logging
-import pandas as pd
 
 from .settings import RAW_DATA_DIR
 
@@ -179,62 +180,92 @@ class DataLoader:
         df.to_csv(cache_path, index=False)
         return df
 
-    def load_benchmark_data(self) -> pd.DataFrame:
+    def load_benchmark_data(self, start_date: str) -> pd.DataFrame:
         """
-        Load benchmark (LQ45) data with caching mechanism.
+        Load daily benchmark (LQ45) data and automatically update if current data is missing.
+
+        Args:
+            start_date (str): Date string in 'YYYY-MM-DD' format
 
         Returns:
-            pd.DataFrame: DataFrame containing benchmark data with columns:
+            pd.DataFrame: DataFrame containing daily benchmark data with columns:
                 - Date (str): Date in 'YYYY-MM-DD' format
-                - Price (float): Benchmark price
-
-        Raises:
-            FileNotFoundError: If benchmark CSV file is not found
-            Exception: If there's an error processing the benchmark data
+                - Price (float): Daily benchmark closing price
         """
         logger.info("Loading benchmark data")
-        cache_path = self.cache_dir / "benchmark_data.csv"
+        cache_path = self.cache_dir / f"benchmark_data_{start_date}.csv"
+        current_date = pd.Timestamp.now()
 
-        if cache_path.exists():
-            logger.info("Loading benchmark data from cache")
-            df = pd.read_csv(cache_path)
-            logger.debug(f"Loaded benchmark data shape: {df.shape}")
-            return df
-
-        logger.info("Cache miss - loading benchmark data from CSV")
-        try:
-            benchmark_path = RAW_DATA_DIR / "LQ45_benchmark.csv"
-            if not benchmark_path.exists():
-                logger.error(f"Benchmark file not found: {benchmark_path}")
-                raise FileNotFoundError(f"Benchmark file not found at: {benchmark_path}")
-
-            logger.debug(f"Reading benchmark file: {benchmark_path}")
-            df = pd.read_csv(benchmark_path)
-            logger.debug(f"Initial benchmark data shape: {df.shape}")
-
+        def fetch_yfinance_data(start: str) -> pd.DataFrame:
+            """Helper function to fetch daily data from yfinance"""
+            logger.info(f"Fetching yfinance data from {start}")
             try:
-                logger.debug("Attempting to parse dates with format '%m/%d/%Y'")
-                df['Date'] = pd.to_datetime(df['Date'], format='%m/%d/%Y')
-            except:
-                try:
-                    logger.debug("Attempting to parse dates with default format")
-                    df['Date'] = pd.to_datetime(df['Date'])
-                except Exception as e:
-                    logger.error(f"Failed to parse dates: {str(e)}")
-                    raise Exception(f"Could not parse dates in benchmark data: {str(e)}")
+                df = yf.download("^JKLQ45", start=start, end=current_date, interval="1d")
+                if df.empty:
+                    logger.error("No data retrieved from yfinance")
+                    raise ValueError("No data retrieved from yfinance")
 
-            df['Date'] = df['Date'].dt.strftime('%Y-%m-%d')
+                df = df.reset_index()
 
-            if df['Price'].dtype == object:
-                logger.debug("Converting Price column to float")
-                df['Price'] = df['Price'].str.replace(',', '').astype(float)
+                # Ensure we have the expected columns
+                if 'Date' not in df.columns or 'Close' not in df.columns:
+                    logger.error("Expected columns not found in yfinance data")
+                    raise ValueError("Missing expected columns in yfinance data")
 
-            logger.info("Saving benchmark data to cache")
-            df.to_csv(cache_path, index=False)
-            logger.debug(f"Final benchmark data shape: {df.shape}")
+                # Select and rename columns
+                df = df[['Date', 'Close']].rename(columns={
+                    'Date': 'Date',
+                    'Close': 'Price'
+                })
 
-            return df
+                # Convert and format dates
+                df['Date'] = pd.to_datetime(df['Date']).dt.strftime('%Y-%m-%d')
+
+                return df
+
+            except Exception as e:
+                logger.error(f"Error in fetch_yfinance_data: {str(e)}")
+                raise Exception(f"Failed to fetch yfinance data: {str(e)}")
+
+        try:
+            if cache_path.exists():
+                logger.info("Loading benchmark data from cache")
+                df = pd.read_csv(cache_path)
+                df['Date'] = pd.to_datetime(df['Date']).dt.strftime('%Y-%m-%d')
+
+                # Check for updates
+                df['Date'] = pd.to_datetime(df['Date'])
+                latest_date = df['Date'].max()
+                df['Date'] = df['Date'].dt.strftime('%Y-%m-%d')
+                days_difference = (current_date - latest_date).days
+                if days_difference > 1:
+                    logger.info(f"Data missing for last {days_difference} days. Fetching updates.")
+                    new_data = fetch_yfinance_data(latest_date.strftime('%Y-%m-%d'))
+
+                    if not new_data.empty:
+                        new_data = new_data[~new_data['Date'].isin(df['Date'])]
+                        if not new_data.empty:
+                            logger.info(f"Adding {len(new_data)} new data points")
+                            df = pd.concat([df, new_data], ignore_index=True)
+                            df = df.sort_values('Date').reset_index(drop=True)
+                            df.to_csv(cache_path, index=False)
+                            logger.info("Cache updated with new data")
+                        else:
+                            logger.info("No new unique data points to add")
+                    else:
+                        logger.info("No new data retrieved")
+            else:
+                logger.info("No cached data found. Fetching complete dataset.")
+                df = fetch_yfinance_data(start_date)
+                df = df.dropna()
+                df.to_csv(cache_path, index=False)
+                logger.info("New data cached successfully")
+
+            # Final processing
+            df = df.sort_values('Date').reset_index(drop=True)
+            logger.info(f"Final dataset shape: {df.shape}")
+            return df[['Date', 'Price']]
+
         except Exception as e:
-            logger.error(f"Error loading benchmark data: {str(e)}", exc_info=True)
-            raise Exception(f"Error loading benchmark data: {str(e)}")
-
+            logger.error(f"Error in benchmark data processing: {str(e)}")
+            raise

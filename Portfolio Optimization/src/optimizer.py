@@ -66,7 +66,7 @@ class PortfolioOptimizer:
             if self.industry_df.empty:
                 raise ValueError("No industry data retrieved from BigQuery")
 
-            self.df_LQ45_benchmark = self.data_loader.load_benchmark_data()
+            self.df_LQ45_benchmark = self.data_loader.load_benchmark_data(self.start_date)
             if self.df_LQ45_benchmark.empty:
                 raise ValueError("No benchmark data loaded from CSV")
 
