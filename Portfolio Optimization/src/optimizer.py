@@ -181,7 +181,10 @@ class PortfolioOptimizer:
         benchmark_df = self.df_LQ45_benchmark.copy()
         # Handle the date conversion properly
         benchmark_df['Date'] = pd.to_datetime(benchmark_df['Date'])
-        _df = benchmark_df[benchmark_df['Date'] >= pd.to_datetime(self.start_date)]
+        _df = benchmark_df[
+            (benchmark_df['Date'] >= pd.to_datetime(self.start_date)) &
+            (benchmark_df['Date'] < pd.to_datetime(self.end_date))
+        ]
 
         # Select and rename columns
         _df = _df[['Date', 'Price']].copy()
