@@ -7,7 +7,6 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 # Copy your application files
 COPY app.py .
 COPY src/ src/
-COPY data/ data/
 COPY pyproject.toml .
 COPY uv.lock .
 # Create virtual environment and sync dependencies with UV

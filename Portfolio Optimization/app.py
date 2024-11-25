@@ -295,10 +295,10 @@ def run_optimization_task(
                 predicate=retry.if_exception_type(Exception),
                 timeout=600.0
             )
-
             def execute_bigquery_job():
                 job = client.load_table_from_json(data, table_id, job_config=job_config)
                 return job.result()
+
             logger.info(f"executing_bigquery_job")
             execute_bigquery_job()
             logger.info(f"Results have been appended to BigQuery table for task_id: {task_id}")
@@ -334,6 +334,51 @@ async def verify_token(x_api_key: str = Header(None, alias="X-API-key")) -> str:
             detail="Invalid Token Bearer key"
         )
     return x_api_key
+
+
+def get_user_portfolio_history(user_id: str) -> Dict[str, Any]:
+    """
+    Get user's portfolio history from BigQuery
+    """
+    query = f"""
+    SELECT *
+    FROM `km-data-dev.tuan_takur.user_generated_optimization`
+    WHERE user_id = '{user_id}'
+    ORDER BY created_at DESC
+    """
+    try:
+        query_job = client.query(query)
+        results = query_job.result()
+        portfolio_history = []
+        for row in results:
+            latest_allocation = row.allocation[-1] if row.allocation else None
+            if latest_allocation:
+                portfolio_history.append({
+                    'generation_id': row.generation_id,
+                    'start_date': row.starting_date,
+                    'datapoints': row.datapoints,
+                    'created_at': row.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+                    'optimized_portfolio_month': latest_allocation['period'],
+                    'optimized_portfolio_allocation': [
+                        {
+                            'ticker': alloc['ticker'],
+                            'allocation_percentage': alloc['allocation_percentage']
+                        }
+                        for alloc in latest_allocation['allocation_detail']
+                        if alloc['industry'] != 'Benchmark'
+                    ]
+                })
+        return {
+            'status': 'success',
+            'message': 'Portfolio history retrieved successfully',
+            'portfolio_history': portfolio_history
+        }
+    except Exception as e:
+        logger.error(f"Error retrieving results from BigQuery: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error retrieving results from BigQuery: {str(e)}"
+        )
 
 
 @app.get("/")
@@ -392,6 +437,21 @@ def get_optimization_result(
     return result
 
 
+@app.get("/users/{user_id}/portfolio-history")
+def get_user_portfolios(
+        user_id: str,
+        api_key: str = Depends(verify_token)
+) -> Dict[str, Any]:
+    """Get all portfolio optimization history for a specific user"""
+    try:
+        logger.info(f"Fetching portfolio history for user: {user_id}")
+        result = get_user_portfolio_history(user_id)
+        return result
+    except Exception as e:
+        logger.error(f"Error fetching user portfolio history: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @app.get("/health")
 def health_check(api_key: str = Depends(verify_token)) -> Dict[str, str]:
     """Health check endpoint"""
@@ -408,6 +468,6 @@ if __name__ == "__main__":
         address="0.0.0.0",
         port=8080,
         interface=Interfaces.ASGI,
-        # workers=4,
-        # threads=2
+        workers=4,
+        threads=2
     ).serve()
