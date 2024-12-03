@@ -8,6 +8,7 @@ from granian.constants import Interfaces
 from pydantic import BaseModel, field_validator
 from typing import Dict, Any, List, Optional
 from google.api_core import retry
+from firebase_admin import auth, credentials, initialize_app
 import uuid
 import os
 import pytz
@@ -23,11 +24,20 @@ logger = logging.getLogger(__name__)
 
 # Get API key from environment variable
 API_KEY = os.getenv("API_KEY")
-# credentials_path = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
+try:
+    credentials_path = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
 
-# Create credentials object
-# credentials = service_account.Credentials.from_service_account_file(credentials_path)
-# client = bigquery.Client(credentials=credentials)
+    # Create credentials object
+    credentials = service_account.Credentials.from_service_account_file(credentials_path)
+    client = bigquery.Client(credentials=credentials)
+except:
+    client = bigquery.Client()
+
+try:
+    initialize_app()
+except ValueError:
+    # Firebase already initialized
+    pass
 
 # Security scheme
 security = HTTPBearer()
@@ -51,7 +61,6 @@ app.add_middleware(
 )
 
 # Initialize BigQuery client
-client = bigquery.Client()
 # Store for optimization results
 optimization_results = {}
 
@@ -336,6 +345,19 @@ async def verify_token(x_api_key: str = Header(None, alias="X-API-key")) -> str:
     return x_api_key
 
 
+async def verify_firebase_token(authorization: str = Header(None)) -> dict:
+    """Verify Firebase ID token from Authorization header."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
+
+    token = authorization.split("Bearer ")[1]
+    try:
+        decoded_token = auth.verify_id_token(token)
+        return decoded_token  # You can return claims like uid for further use
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"Invalid token: {str(e)}")
+
+
 def get_user_portfolio_history(user_id: str) -> Dict[str, Any]:
     """
     Get user's portfolio history from BigQuery
@@ -384,7 +406,7 @@ def get_user_portfolio_history(user_id: str) -> Dict[str, Any]:
 @app.get("/")
 def read_root():
     return {"Status": "OK",
-            "Message": "Welcome to Portfolio Optimization API (24-11-15.01)"
+            "Message": "Welcome to Portfolio Optimization API (24-11-26.01)"
             }
 
 
@@ -392,11 +414,13 @@ def read_root():
 def optimize(
         request: OptimizationRequest,
         background_tasks: BackgroundTasks,
-        api_key: str = Depends(verify_token)
-) -> Dict[str, Any]:
+        api_key: str = Depends(verify_token),
+        user_claims: dict = Depends(verify_firebase_token)
+)-> Dict[str, Any]:
     """Start portfolio optimization"""
     try:
         task_id = str(uuid.uuid4())
+        # user_id = user_claims['uid']
         optimization_results[task_id] = {
             'status': 'processing',
             'message': 'Optimization in progress'
