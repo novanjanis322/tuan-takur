@@ -4,6 +4,7 @@ from google.oauth2 import service_account
 from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer
+from fastapi.responses import JSONResponse
 from granian.constants import Interfaces
 from pydantic import BaseModel, field_validator
 from typing import Dict, Any, List, Optional
@@ -54,7 +55,7 @@ app = FastAPI(
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*", "http://localhost:5173", "https://portfolio-backend-741957175071.asia-southeast2.run.app"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -352,10 +353,19 @@ async def verify_firebase_token(authorization: str = Header(None)) -> dict:
 
     token = authorization.split("Bearer ")[1]
     try:
+        logger.info(f"Attempting to verify token: {token[:20]}...")  # Log first 20 chars of token
         decoded_token = auth.verify_id_token(token)
-        return decoded_token  # You can return claims like uid for further use
+        logger.info(f"Token verified successfully for UID: {decoded_token.get('uid')}")
+        return decoded_token
+    except auth.InvalidIdTokenError as e:
+        logger.error(f"Invalid ID Token: {str(e)}")
+        raise HTTPException(status_code=401, detail="Invalid Firebase token structure")
+    except auth.ExpiredIdTokenError as e:
+        logger.error(f"Expired ID Token: {str(e)}")
+        raise HTTPException(status_code=401, detail="Firebase token has expired")
     except Exception as e:
-        raise HTTPException(status_code=401, detail=f"Invalid token: {str(e)}")
+        logger.error(f"Unexpected Firebase token verification error: {str(e)}")
+        raise HTTPException(status_code=401, detail=f"Token verification failed: {str(e)}")
 
 
 def get_user_portfolio_history(user_id: str) -> Dict[str, Any]:
@@ -402,7 +412,14 @@ def get_user_portfolio_history(user_id: str) -> Dict[str, Any]:
             detail=f"Error retrieving results from BigQuery: {str(e)}"
         )
 
-
+@app.options("/{rest_of_path:path}")
+def preflight_handler():
+    headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Authorization, Content-Type, X-API-key",
+    }
+    return JSONResponse(status_code=200, headers=headers)
 @app.get("/")
 def read_root():
     return {"Status": "OK",
