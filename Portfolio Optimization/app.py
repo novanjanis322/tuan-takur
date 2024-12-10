@@ -359,7 +359,7 @@ async def verify_firebase_token(authorization: str = Header(None)) -> dict:
         return decoded_token
     except auth.InvalidIdTokenError as e:
         logger.error(f"Invalid ID Token: {str(e)}")
-        raise HTTPException(status_code=401, detail="Invalid Firebase token structure")
+        raise HTTPException(status_code=401, detail="Invalid Firebase token")
     except auth.ExpiredIdTokenError as e:
         logger.error(f"Expired ID Token: {str(e)}")
         raise HTTPException(status_code=401, detail="Firebase token has expired")
@@ -412,6 +412,7 @@ def get_user_portfolio_history(user_id: str) -> Dict[str, Any]:
             detail=f"Error retrieving results from BigQuery: {str(e)}"
         )
 
+
 @app.options("/{rest_of_path:path}")
 def preflight_handler():
     headers = {
@@ -420,6 +421,8 @@ def preflight_handler():
         "Access-Control-Allow-Headers": "Authorization, Content-Type, X-API-key",
     }
     return JSONResponse(status_code=200, headers=headers)
+
+
 @app.get("/")
 def read_root():
     return {"Status": "OK",
@@ -433,7 +436,7 @@ def optimize(
         background_tasks: BackgroundTasks,
         api_key: str = Depends(verify_token),
         user_claims: dict = Depends(verify_firebase_token)
-)-> Dict[str, Any]:
+) -> Dict[str, Any]:
     """Start portfolio optimization"""
     try:
         task_id = str(uuid.uuid4())
@@ -463,7 +466,8 @@ def optimize(
 @app.get("/optimizers/{task_id}", response_model=OptimizationResult)
 def get_optimization_result(
         task_id: str,
-        api_key: str = Depends(verify_token)
+        api_key: str = Depends(verify_token),
+        user_claims: dict = Depends(verify_firebase_token)
 ) -> Dict[str, Any]:
     """Get optimization results from BigQuery"""
     print(f"Received request for task_id: {task_id}")
@@ -481,7 +485,8 @@ def get_optimization_result(
 @app.get("/users/{user_id}/portfolio-history")
 def get_user_portfolios(
         user_id: str,
-        api_key: str = Depends(verify_token)
+        api_key: str = Depends(verify_token),
+        user_claims: dict = Depends(verify_firebase_token)
 ) -> Dict[str, Any]:
     """Get all portfolio optimization history for a specific user"""
     try:
@@ -494,12 +499,14 @@ def get_user_portfolios(
 
 
 @app.get("/health")
-def health_check(api_key: str = Depends(verify_token)) -> Dict[str, str]:
+def health_check(
+        api_key: str = Depends(verify_token)
+) -> Dict[str, str]:
     """Health check endpoint"""
-    WIB = pytz.timezone('Asia/Jakarta')
+    wib = pytz.timezone('Asia/Jakarta')
     return {
         'status': 'healthy',
-        'timestamp': datetime.now(WIB).strftime('%Y-%m-%d %H:%M:%S')
+        'timestamp': datetime.now(wib).strftime('%Y-%m-%d %H:%M:%S')
     }
 
 
