@@ -1,42 +1,75 @@
-# Cube.js Tutorial
+# Integrasi Frontend dengan Cube.js API dan Query
 
-## Sekilas Cube Playground
+Penjelasan langkah-langkah integrasikan Cube.js API dengan frontend & cara membuat query ke Cube.js API.
 
-__Playground link__: http://cubeopt.southeastasia.cloudapp.azure.com:4000/
+## Prasyarat
 
-Ada 4 fitur utama, yaitu:
-* `Playground` untuk "ngoprek" running query, tabel output, visualisasi
-* `Data Model` berisi list tabel yang dapat digunakan dari bigquery yang sudah tersambung (ada pada `Tables`) & data model dari tabel yang digunakan (ada pada `Files`) 
-* `Frontend Integrations` berisi informasi endpoint REST API, Websockets, dan GraphQL untuk integrasi frontend
-* `Connect to BI`
+* Backend Cube.js yang telah dikonfigurasi.
+* Proyek frontend yang menggunakan framework seperti React, Vue, atau Angular.
+* API key Cube.js
 
-## Running Query di Cube Playground
+## Instalasi Software Dev Kit Cube.js (React)
 
-Buka `Playground`
-
-Pilih Cube (tabel data) yang ingin di-run (misal "user_generated_optimization")
-
-Pilih dimension (biru) dan measure (kuning) yang ingin dipanggil, lalu klik `Run Query`
-
-Untuk filter data, bisa menggunakan fitur `Filters` (tepat di bawah tombol `Run Query`). Order setiap dimension & measure bisa ditambahkan menggunakan fitur `Order` (bawah kanan)
-
-
-## Local Dashboard
-
-Pada `Playground`, klik fitur `Code`
-
-Pilih jenis visualisasi, untuk preview output bisa dilihat dengan fitur `Preview`
-
-Klik `Source` (Pojok kiri bawah) untuk download zip source code yang telah di-generate oleh Cube & `Config` (Pojok kiri bawah) untuk download file .env
-
-### Running React App
-
-_Catatan: Tutorial didasarkan pada yang ada di Github_
-
-```
-cd folder
-npm install
-npm start
+```bash
+npm install @cubejs-client/core @cubejs-client/react
 ```
 
-Lalu buka `http://localhost:5173/vizard/preview/react-app`
+## Dependencies
+
+```json
+{
+  "dependencies": {
+    "@cubejs-client/core": "^0.35.0",
+    "@cubejs-client/react": "^0.35.0",
+    "@cubejs-client/ws-transport": "^0.35.23",
+    "chart.js": "^4.4.2",
+    "react": "^18.2.0",
+    "react-chartjs-2": "^5.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.56",
+    "@types/react-dom": "^18.2.19",
+    "@typescript-eslint/eslint-plugin": "^7.0.2",
+    "@typescript-eslint/parser": "^7.0.2",
+    "@vitejs/plugin-react": "^4.2.1",
+    "eslint": "^8.56.0",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "eslint-plugin-react-refresh": "^0.4.5",
+    "typescript": "^5.2.2",
+    "vite": "^5.1.4"
+  }
+}
+```
+
+## Konfigurasi Cube.js Client
+
+```tsx
+const { apiUrl, apiToken, query1, pivotConfig1, chartType1, query2, pivotConfig2, chartType2, useWebSockets, useSubscription } = extractHashConfig(
+  {
+    // Konfigurasi API Cube
+    apiUrl: import.meta.env.VITE_CUBE_API_URL || '',
+    apiToken: import.meta.env.VITE_CUBE_API_TOKEN || '',
+
+    // Konfigurasi Query & Pivot untuk Chart 1
+    query1: JSON.parse(import.meta.env.VITE_CUBE_QUERY_1 || '{}') as Query,
+    pivotConfig1: JSON.parse(
+      import.meta.env.VITE_CUBE_PIVOT_CONFIG_1 || '{}'
+    ) as PivotConfig,
+    chartType1: import.meta.env.VITE_CHART_TYPE_1 as ChartType,
+
+    // Konfigurasi Query & Pivot untuk Chart 2
+    query2: JSON.parse(import.meta.env.VITE_CUBE_QUERY_2 || '{}') as Query,
+    pivotConfig2: JSON.parse(
+      import.meta.env.VITE_CUBE_PIVOT_CONFIG_2 || '{}'
+    ) as PivotConfig,
+    chartType2: import.meta.env.VITE_CHART_TYPE_2 as ChartType,
+
+    // Pengaturan WebSocket dan Subscription
+    // Mengkonversi string environment variables ke boolean
+    useWebSockets: import.meta.env.VITE_CUBE_API_USE_WEBSOCKETS === 'true',
+    useSubscription: import.meta.env.VITE_CUBE_API_USE_SUBSCRIPTION === 'true'
+  });
+```
+
+
