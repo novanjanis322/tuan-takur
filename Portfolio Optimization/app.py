@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 # Get API key from environment variable
 API_KEY = os.getenv("API_KEY")
+BQ_TABLE = os.getenv("BQ_TABLE")
 try:
     credentials_path = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
 
@@ -112,12 +113,12 @@ def get_latest_allocation(generation_id: str) -> Dict[str, Any]:
     WITH latest_allocation AS (
         SELECT 
             generation_id,
-            user_id,
+            user_id,    
             starting_date,
             datapoints,
             created_at,
             allocation
-        FROM `km-data-dev.tuan_takur.user_generated_optimization`
+        FROM `{BQ_TABLE}`
         WHERE generation_id = '{generation_id}'
     )
     SELECT *
@@ -289,7 +290,7 @@ def run_optimization_task(
         ]
 
         try:
-            table_id = 'km-data-dev.tuan_takur.user_generated_optimization'
+            table_id = f'{BQ_TABLE}'
             logger.info(f"table_id has been set {table_id}")
             job_config = bigquery.LoadJobConfig(
                 schema=schema,
@@ -374,7 +375,7 @@ def get_user_portfolio_history(user_id: str) -> Dict[str, Any]:
     """
     query = f"""
     SELECT *
-    FROM `km-data-dev.tuan_takur.user_generated_optimization`
+    FROM `{BQ_TABLE}`
     WHERE user_id = '{user_id}'
     ORDER BY created_at DESC
     """
@@ -426,7 +427,7 @@ def preflight_handler():
 @app.get("/")
 def read_root():
     return {"Status": "OK",
-            "Message": "Welcome to Portfolio Optimization API (24-11-26.01)"
+            "Message": "Welcome to Portfolio Optimization API (24-12-17.02)"
             }
 
 
@@ -466,7 +467,7 @@ def optimize(
 @app.get("/optimizers/{task_id}", response_model=OptimizationResult)
 def get_optimization_result(
         task_id: str,
-        api_key: str = Depends(verify_token),
+        # api_key: str = Depends(verify_token),
         user_claims: dict = Depends(verify_firebase_token)
 ) -> Dict[str, Any]:
     """Get optimization results from BigQuery"""
@@ -500,7 +501,7 @@ def get_user_portfolios(
 
 @app.get("/health")
 def health_check(
-        api_key: str = Depends(verify_token)
+        # api_key: str = Depends(verify_token)
 ) -> Dict[str, str]:
     """Health check endpoint"""
     wib = pytz.timezone('Asia/Jakarta')
