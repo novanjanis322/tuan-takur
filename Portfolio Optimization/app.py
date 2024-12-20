@@ -67,9 +67,9 @@ topic_path = publisher.topic_path(PROJECT_ID, TOPIC_ID)
 
 
 class OptimizationRequest(BaseModel):
-    start_date = str
-    granularity = str
-    user_id = str
+    start_date: str
+    granularity: str
+    user_id: str
 
     @field_validator('start_date')
     def validate_start_date(cls, value):
@@ -87,8 +87,8 @@ class OptimizationRequest(BaseModel):
 
 
 class OptimizationResponse(BaseModel):
-    task_id = str
-    status = str
+    task_id: str
+    status: str
     message: str
 
 
