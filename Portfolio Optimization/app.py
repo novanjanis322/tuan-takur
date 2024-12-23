@@ -1,3 +1,4 @@
+import requests
 from google.cloud import bigquery
 from dotenv import load_dotenv
 from google.oauth2 import service_account
@@ -48,7 +49,7 @@ security = HTTPBearer()
 app = FastAPI(
     title="Portfolio Optimization API",
     description="API for portfolio optimization and analysis",
-    version="1.0.0",
+    version="1.0.2",
     docs_url="/docs",
     redoc_url="/redoc"
 )
@@ -313,6 +314,17 @@ def run_optimization_task(
             logger.info(f"executing_bigquery_job")
             execute_bigquery_job()
             logger.info(f"Results have been appended to BigQuery table for task_id: {task_id}")
+            logger.info(f"Optimization completed successfully for task_id: {task_id}")
+            notify_url = os.getenv("NOTIFY_URL")
+            payload = {
+                "generation_id" : task_id
+            }
+            response = requests.post(notify_url, json=payload)
+            if response.status_code == 200:
+                logger.info(f"Notification sent successfully for task_id: {task_id}")
+            else:
+                logger.error(f"Error sending notification for task_id: {task_id}")
+
 
         except Exception as e:
             logger.error(f"Error writing to BigQuery: {str(e)}", exc_info=True)
@@ -427,7 +439,7 @@ def preflight_handler():
 @app.get("/")
 def read_root():
     return {"Status": "OK",
-            "Message": "Welcome to Portfolio Optimization API (24-12-17.02)"
+            "Message": "Welcome to Portfolio Optimization API (24-12-23.01)"
             }
 
 
