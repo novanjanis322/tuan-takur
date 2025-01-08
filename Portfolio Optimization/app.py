@@ -317,7 +317,7 @@ def run_optimization_task(
             logger.info(f"Optimization completed successfully for task_id: {task_id}")
             notify_url = os.getenv("NOTIFY_URL")
             payload = {
-                "generation_id" : task_id
+                "generation_id": task_id
             }
             response = requests.post(notify_url, json=payload)
             if response.status_code == 200:
@@ -448,7 +448,7 @@ def optimize(
         request: OptimizationRequest,
         background_tasks: BackgroundTasks,
         api_key: str = Depends(verify_token),
-        user_claims: dict = Depends(verify_firebase_token)
+        # user_claims: dict = Depends(verify_firebase_token)
 ) -> Dict[str, Any]:
     """Start portfolio optimization"""
     try:

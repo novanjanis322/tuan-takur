@@ -1,4 +1,5 @@
 import gurobipy as gp
+import numpy as np
 import pandas as pd
 from typing import Optional, Union
 from datetime import datetime, date
@@ -236,20 +237,29 @@ class PortfolioOptimizer:
         _df = self.training_data_df.sort_values(by="date").drop_duplicates(
             subset=["date", "ticker"]
         )
+        _df["sequential_index"] = _df.groupby("ticker").cumcount()
 
         # Store the tickers being processed
         self.processed_tickers = set()
 
-        _df_pivot = _df.pivot(index="date", columns="ticker", values="adj_close")
+        _df_pivot = _df.pivot(index="sequential_index", columns="ticker", values="adj_close")
         _df_pivot = _df_pivot.dropna(how="all", axis=1)
         _df_pivot = _df_pivot.ffill().bfill()
         monthly_returns = _df_pivot.pct_change().dropna()
         monthly_returns = monthly_returns.loc[:, (monthly_returns != 0).any(axis=0)]
 
+        time_delta = pd.to_datetime(_df['date']).diff().mean()
+        annual_factor = pd.Timedelta('365 days') / time_delta
         # Store the tickers that made it through the processing
         self.processed_tickers = set(monthly_returns.columns)
 
-        cov_matrix = monthly_returns.cov()
+        cov_matrix = monthly_returns.cov() * np.sqrt(annual_factor)
+
+        print("\nVolatility Statistics:")
+        annual_vols = np.sqrt(np.diag(cov_matrix)) * 100  # Convert to percentage
+        print(f"Average Annual Stock Volatility: {np.mean(annual_vols):.2f}%")
+        print(f"Max Annual Stock Volatility: {np.max(annual_vols):.2f}%")
+        print(f"Min Annual Stock Volatility: {np.min(annual_vols):.2f}%")
         cov_matrix_val = cov_matrix.values
         self.cov_matrix = cov_matrix
         self.cov_matrix_val = cov_matrix_val
@@ -330,6 +340,37 @@ class PortfolioOptimizer:
         env = gp.Env(params=params)
         self.model = gp.Model(env=env)
 
+    def verify_portfolio_risk(self):
+        """
+        Comprehensive portfolio risk verification.
+        """
+        portfolio_weights = np.array([self.allocations[stock].X for stock in self.stock_names])
+
+        # Calculate portfolio volatility
+        portfolio_variance = portfolio_weights.T @ self.cov_matrix_val @ portfolio_weights
+        portfolio_volatility = np.sqrt(portfolio_variance)
+
+        print("\nPortfolio Risk Analysis:")
+        print(f"Annual Portfolio Volatility: {portfolio_volatility * 100:.2f}%")
+
+        # Calculate and show risk decomposition
+        print("\nRisk Decomposition:")
+        total_risk = 0
+        for i, (stock, weight) in enumerate(zip(self.stock_names, portfolio_weights)):
+            if weight > 0.01:  # Only show positions > 1%
+                stock_vol = np.sqrt(self.cov_matrix_val[i][i])
+                contribution = weight * stock_vol
+                total_risk += contribution
+                print(f"{stock}:")
+                print(f"  Weight: {weight * 100:.1f}%")
+                print(f"  Individual Volatility: {stock_vol * 100:.1f}%")
+                print(f"  Risk Contribution: {contribution * 100:.1f}%")
+
+        print(f"\nTotal Risk Contributions: {total_risk * 100:.2f}%")
+        print(f"Portfolio Volatility: {portfolio_volatility * 100:.2f}%")
+
+        return portfolio_volatility
+
     def define_optimization_model(self) -> None:
         """
         Define the portfolio optimization model with constraints.
@@ -362,22 +403,38 @@ class PortfolioOptimizer:
             ),
             GRB.MAXIMIZE,
         )
+
+        target_annual_volatility = 0.5
         self.model.addQConstr(
             quicksum(
                 self.cov_matrix_val[i][j] * allocations[stock_i] * allocations[stock_j]
                 for i, stock_i in enumerate(self.stock_names)
                 for j, stock_j in enumerate(self.stock_names)
             )
-            <= (0.2**2),
+            <= target_annual_volatility ** 2,
             "RiskLimit",
         )
+        # Individual stock contribution constraints
+        for i, stock in enumerate(self.stock_names):
+            stock_variance = self.cov_matrix_val[i][i]
+            self.model.addConstr(
+                allocations[stock] * np.sqrt(stock_variance) <= target_annual_volatility,
+                f"IndividualRiskLimit_{stock}"
+            )
         self.model.addConstr(
             quicksum(allocations[stock] for stock in self.stock_names) == 1,
             "TotalInvestment",
         )
         self.model.addConstr(
-            quicksum(select_vars[stock] for stock in self.stock_names) >= 2, "MinStocks"
+            quicksum(select_vars[stock] for stock in self.stock_names) >= 2,
+            "MinStocks"
         )
+        max_allocation = 0.3
+        for stock in self.stock_names:
+            self.model.addConstr(
+                allocations[stock] <= max_allocation,
+                "MaxAllocation"
+            )
 
         self.model.addConstr(
             quicksum(
@@ -608,6 +665,9 @@ def run_optimization_pipeline(granularity: int, start_date: Optional[Union[str, 
 
         logger.info(f"optimization result for {optimizer.start_date}")
         optimizer.optimization_result()
+
+        logger.info(f"verify portfolio risk for {optimizer.start_date}")
+        optimizer.verify_portfolio_risk()
 
         # Update dates for next iteration
         current_date = datetime.strptime(optimizer.start_date, '%Y-%m-%d')
