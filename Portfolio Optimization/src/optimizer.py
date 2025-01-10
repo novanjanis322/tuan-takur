@@ -12,8 +12,12 @@ from .settings import *
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+
 class PortfolioOptimizer:
-    def __init__(self, granularity: int, start_date: Union[str, datetime, date]) -> None:
+    def __init__(self,
+                 granularity: int,
+                 start_date: Union[str, datetime, date],
+                 volatility: float) -> None:
         load_dotenv()
 
         # Initialize Gurobi credentials
@@ -22,6 +26,7 @@ class PortfolioOptimizer:
         self.LICENSEID = LICENSE_ID
 
         self.granularity = granularity
+        self.volatility = volatility
 
         # Convert dates to string format
         if isinstance(start_date, (datetime, date)):
@@ -104,10 +109,10 @@ class PortfolioOptimizer:
         _df = self.df[
             (self.df["date"] >= self.start_date) &
             (self.df["date"] < self.last_date)
-        ]
+            ]
         self.prep_backtesting_data_df = _df
 
-    def pnl_backtesting_simulation(self,is_benchmark: bool = False) -> Optional[pd.DataFrame]:
+    def pnl_backtesting_simulation(self, is_benchmark: bool = False) -> Optional[pd.DataFrame]:
         """
         Perform PNL backtesting simulation for portfolio or benchmark.
 
@@ -185,7 +190,7 @@ class PortfolioOptimizer:
         _df = benchmark_df[
             (benchmark_df['Date'] >= pd.to_datetime(self.start_date)) &
             (benchmark_df['Date'] < pd.to_datetime(self.end_date))
-        ]
+            ]
 
         # Select and rename columns
         _df = _df[['Date', 'Price']].copy()
@@ -250,13 +255,12 @@ class PortfolioOptimizer:
 
         time_delta = pd.to_datetime(_df['date']).diff().mean()
         annual_factor = pd.Timedelta('365 days') / time_delta
-        # Store the tickers that made it through the processing
         self.processed_tickers = set(monthly_returns.columns)
 
         cov_matrix = monthly_returns.cov() * np.sqrt(annual_factor)
 
         print("\nVolatility Statistics:")
-        annual_vols = np.sqrt(np.diag(cov_matrix)) * 100  # Convert to percentage
+        annual_vols = np.sqrt(np.diag(cov_matrix)) * 100
         print(f"Average Annual Stock Volatility: {np.mean(annual_vols):.2f}%")
         print(f"Max Annual Stock Volatility: {np.max(annual_vols):.2f}%")
         print(f"Min Annual Stock Volatility: {np.min(annual_vols):.2f}%")
@@ -289,9 +293,9 @@ class PortfolioOptimizer:
         )
 
         monthly_metrics["monthly_return (%)"] = (
-            100
-            * (monthly_metrics["close_price"] - monthly_metrics["open_price"])
-            / monthly_metrics["open_price"]
+                100
+                * (monthly_metrics["close_price"] - monthly_metrics["open_price"])
+                / monthly_metrics["open_price"]
         )
 
         monthly_metrics = pd.merge(
@@ -357,7 +361,7 @@ class PortfolioOptimizer:
         print("\nRisk Decomposition:")
         total_risk = 0
         for i, (stock, weight) in enumerate(zip(self.stock_names, portfolio_weights)):
-            if weight > 0.01:  # Only show positions > 1%
+            if weight > 0.01:
                 stock_vol = np.sqrt(self.cov_matrix_val[i][i])
                 contribution = weight * stock_vol
                 total_risk += contribution
@@ -404,15 +408,16 @@ class PortfolioOptimizer:
             GRB.MAXIMIZE,
         )
 
-        target_annual_volatility = 0.5
-        self.model.addQConstr(
-            quicksum(
-                self.cov_matrix_val[i][j] * allocations[stock_i] * allocations[stock_j]
-                for i, stock_i in enumerate(self.stock_names)
-                for j, stock_j in enumerate(self.stock_names)
-            )
-            <= target_annual_volatility ** 2,
-            "RiskLimit",
+        target_annual_volatility = self.volatility
+        # self.volatility = target_annual_volatility
+        risk_expression = quicksum(
+            self.cov_matrix_val[i][j] * allocations[stock_i] * allocations[stock_j]
+            for i, stock_i in enumerate(self.stock_names)
+            for j, stock_j in enumerate(self.stock_names)
+        )
+        self.model.addConstr(
+            risk_expression <= target_annual_volatility ** 2,
+            "RiskLimit"
         )
         # Individual stock contribution constraints
         for i, stock in enumerate(self.stock_names):
@@ -421,6 +426,19 @@ class PortfolioOptimizer:
                 allocations[stock] * np.sqrt(stock_variance) <= target_annual_volatility,
                 f"IndividualRiskLimit_{stock}"
             )
+
+        min_allocation = 0.01
+        max_allocation = 0.3
+        for stock in self.stock_names:
+            self.model.addConstr(
+                allocations[stock] <= max_allocation * select_vars[stock],
+                "MaxAllocation"
+            )
+            self.model.addConstr(
+                allocations[stock] >= min_allocation * select_vars[stock],
+                "MinAllocation"
+            )
+
         self.model.addConstr(
             quicksum(allocations[stock] for stock in self.stock_names) == 1,
             "TotalInvestment",
@@ -429,12 +447,10 @@ class PortfolioOptimizer:
             quicksum(select_vars[stock] for stock in self.stock_names) >= 2,
             "MinStocks"
         )
-        max_allocation = 0.3
-        for stock in self.stock_names:
-            self.model.addConstr(
-                allocations[stock] <= max_allocation,
-                "MaxAllocation"
-            )
+        self.model.addConstr(
+            quicksum(select_vars[stock] for stock in self.stock_names) <= int(1 / min_allocation),
+            "MaxStocks"
+        )
 
         self.model.addConstr(
             quicksum(
@@ -465,7 +481,7 @@ class PortfolioOptimizer:
         Process and store optimization results.
 
         Extracts optimal portfolio weights and corresponding PNL percentages
-        for stocks with allocation > 1%. Results are stored in the optimized_portfolio
+        for stocks with allocation > 0.5%. Results are stored in the optimized_portfolio
         DataFrame with columns:
             - period: Year-month of the optimization
             - datapoints: Number of days in granularity
@@ -476,9 +492,18 @@ class PortfolioOptimizer:
         Only processes results if optimal solution is found.
         """
         if self.model.status == GRB.OPTIMAL:
-            new_rows = []  # Move this outside the loop
+            new_rows = []
+            positions = []
+
+            total_allocation = sum(self.allocations[stock].X for stock in self.stock_names)
+            print(f"\nOptimization Solution Status:")
+            print(f"Total allocation: {total_allocation * 100:.2f}%")
+            print(f"Number of selected stocks: {sum(self.select_vars[stock].X > 0.5 for stock in self.stock_names)}")
+
+            min_reporting_threshold = 0.005  # 0.5%
             for stock in self.allocations:
-                if self.allocations[stock].X > 1e-2:
+                weight = self.allocations[stock].X
+                if weight > min_reporting_threshold:
                     try:
                         pnl_percentage = self.monthly_return_list[
                             self.monthly_return_ticker.index(stock)
@@ -490,23 +515,44 @@ class PortfolioOptimizer:
                     except:
                         industry = "Unknown"
 
-                    new_rows.append(
-                        {
-                            "period": datetime.strptime(self.start_date, '%Y-%m-%d').strftime("%Y-%m"),
-                            "datapoints": int(self.granularity),
-                            "ticker": str(stock),
-                            "industry": str(industry),
-                            "allocations": float(round(self.allocations[stock].X, 2)),
-                            "pnl_percentage": float(round(pnl_percentage, 2)),
-                        }
-                    )
+                    positions.append({
+                        "ticker": stock,
+                        "weight": weight,
+                        "industry": industry,
+                        "pnl_percentage": pnl_percentage
+                    })
 
-            # Add all rows at once outside the loop
-            if new_rows:  # Only concatenate if there are new rows
+            if positions:
+                total_weight = sum(pos["weight"] for pos in positions)
+
+                for pos in positions:
+                    weight = round(pos["weight"] / total_weight, 2)
+                    new_rows.append({
+                        "period": datetime.strptime(self.start_date, '%Y-%m-%d').strftime("%Y-%m"),
+                        "datapoints": int(self.granularity),
+                        "risk": float(self.volatility),
+                        "ticker": pos["ticker"],
+                        "industry": pos["industry"],
+                        "allocations": weight,
+                        "pnl_percentage": float(round(pos["pnl_percentage"], 2)),
+                    })
+
+                df = pd.DataFrame(new_rows)
+                total = df["allocations"].sum()
+                if total != 1.0:
+                    idx_max = df["allocations"].idxmax()
+                    df.loc[idx_max, "allocations"] = round(df.loc[idx_max, "allocations"] + (1.0 - total), 2)
+
+                print(f"\nPortfolio Allocation Summary:")
+                print(f"Number of positions: {len(df)}")
+                print(f"Total allocation in results: {df['allocations'].sum() * 100:.2f}%")
+
                 self.optimized_portfolio = pd.concat(
-                    [self.optimized_portfolio, pd.DataFrame(new_rows)],
-                    ignore_index=True,
+                    [self.optimized_portfolio, df],
+                    ignore_index=True
                 )
+        else:
+            print(f"Optimization failed to find a solution with status: {self.model.status}")
 
     def backtesting_simulation(self) -> None:
         """
@@ -568,6 +614,7 @@ class PortfolioOptimizer:
             [self.optimized_portfolio, self.benchmark_pnl_backtesting_df],
             ignore_index=True,
         )
+
     def find_tickers(self, find_date: str) -> Optional[pd.DataFrame]:
         """
         Find portfolio allocations for a specific date.
@@ -595,20 +642,22 @@ class PortfolioOptimizer:
             optimized_portfolio_df = pd.DataFrame(self.optimized_portfolio)
             optimized_portfolio_df = optimized_portfolio_df[
                 optimized_portfolio_df["period"] == find_date.strftime("%Y-%m")
-            ]
+                ]
             return optimized_portfolio_df
 
 
-def run_optimization_pipeline(granularity: int, start_date: Optional[Union[str, datetime]] = None) -> 'PortfolioOptimizer':
+def run_optimization_pipeline(granularity: int,
+                              volatility: float,
+                              start_date: Optional[Union[str, datetime]] = None) -> 'PortfolioOptimizer':
     """
     Run the complete portfolio optimization pipeline.
 
     Args:
         granularity (int): Number of days for the optimization window,
-            typically between 1 and 252
         start_date (Optional[Union[str, datetime]], optional): Start date for optimization.
             Can be either a string in 'YYYY-MM-DD' format or a datetime object.
             If None, defaults to first day of previous month. Defaults to None.
+        volatility: Maximum annual volatility for the portfolio
 
     Returns:
         PortfolioOptimizer: Optimized portfolio instance containing the results
@@ -619,19 +668,19 @@ def run_optimization_pipeline(granularity: int, start_date: Optional[Union[str, 
         Exception: If optimization process fails
 
     Example:
-        optimizer = run_optimization_pipeline(granularity=30, start_date="2023-01-01")
+        optimizer = run_optimization_pipeline(granularity=30, start_date="2023-01-01", volatility=0.2)
         results_df = optimizer.final_result
     """
 
     if start_date is None:
         start_date = (
-            datetime.now().replace(day=1) -
-            relativedelta(months=1)
+                datetime.now().replace(day=1) -
+                relativedelta(months=1)
         ).strftime('%Y-%m-%d')
     elif isinstance(start_date, (datetime, date)):
         start_date = start_date.strftime('%Y-%m-%d')
 
-    optimizer = PortfolioOptimizer(granularity, start_date)
+    optimizer = PortfolioOptimizer(granularity, start_date, volatility)
     optimizer.load_data()
     optimizer.prepare_benchmark_data()
     logger.info(f"loading data for {optimizer.start_date} has been completed")
@@ -672,13 +721,12 @@ def run_optimization_pipeline(granularity: int, start_date: Optional[Union[str, 
         # Update dates for next iteration
         current_date = datetime.strptime(optimizer.start_date, '%Y-%m-%d')
         optimizer.start_date = (
-            current_date + relativedelta(months=1)
+                current_date + relativedelta(months=1)
         ).strftime('%Y-%m-%d')
         optimizer.last_date = (
-            datetime.strptime(optimizer.last_date, '%Y-%m-%d') +
-            relativedelta(months=1)
+                datetime.strptime(optimizer.last_date, '%Y-%m-%d') +
+                relativedelta(months=1)
         ).strftime('%Y-%m-%d')
-        logger.info(f"going to the next optimization date: {optimizer.start_date}")
 
     optimizer.backtesting_simulation()
     return optimizer

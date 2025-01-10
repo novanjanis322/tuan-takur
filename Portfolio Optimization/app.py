@@ -72,6 +72,7 @@ class OptimizationRequest(BaseModel):
     start_date: str
     granularity: int
     user_id: str
+    volatility: float
 
     @field_validator('start_date')
     def validate_start_date(cls, v):
@@ -190,7 +191,9 @@ def run_optimization_task(
         logger.info(f"Running optimization for task_id: {task_id}")
         optimizer = run_optimization_pipeline(
             request.granularity,
+            request.volatility,
             request.start_date
+
         )
 
         results_df = optimizer.final_result
@@ -244,6 +247,7 @@ def run_optimization_task(
                 'user_id': request.user_id,
                 'start_date': request.start_date,
                 'datapoints': request.granularity,
+                'volatility': request.volatility,
                 'created_at': current_timestamp.isoformat()
             }
         }
@@ -254,6 +258,7 @@ def run_optimization_task(
             'user_id': request.user_id,
             'starting_date': request.start_date,
             'datapoints': request.granularity,
+            'volatility': request.volatility,
             'created_at': current_timestamp.isoformat(),
             'allocation': allocation_array
         }]
@@ -265,6 +270,7 @@ def run_optimization_task(
             bigquery.SchemaField("user_id", "STRING", mode="REQUIRED"),
             bigquery.SchemaField("starting_date", "STRING", mode="REQUIRED"),
             bigquery.SchemaField("datapoints", "INTEGER", mode="REQUIRED"),
+            bigquery.SchemaField("volatility", "FLOAT", mode="REQUIRED"),
             bigquery.SchemaField("created_at", "TIMESTAMP", mode="REQUIRED"),
             bigquery.SchemaField(
                 "allocation",
@@ -295,7 +301,7 @@ def run_optimization_task(
             logger.info(f"table_id has been set {table_id}")
             job_config = bigquery.LoadJobConfig(
                 schema=schema,
-                create_disposition="CREATE_NEVER",
+                # create_disposition="CREATE_NEVER",
                 write_disposition="WRITE_APPEND"
             )
             logger.info(f"job_config has been set")
@@ -453,7 +459,6 @@ def optimize(
     """Start portfolio optimization"""
     try:
         task_id = str(uuid.uuid4())
-        # user_id = user_claims['uid']
         optimization_results[task_id] = {
             'status': 'processing',
             'message': 'Optimization in progress'

@@ -105,7 +105,7 @@ class DataLoader:
 
         logger.info("Cache miss - querying fresh data from BigQuery")
         start_dt = datetime.strptime(start_date, '%Y-%m-%d')
-        date_query = (start_dt - relativedelta(years=2)).strftime('%Y-%m-%d')
+        date_query = (start_dt - relativedelta(years=3)).strftime('%Y-%m-%d')
         logger.debug(f"Query date range: {date_query} to current")
         query = f"""
           WITH get_data AS (
