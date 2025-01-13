@@ -10,7 +10,7 @@ from granian.constants import Interfaces
 from pydantic import BaseModel, field_validator
 from typing import Dict, Any, List, Optional
 from google.api_core import retry
-from firebase_admin import auth, credentials, initialize_app
+from firebase_admin import auth, initialize_app
 import uuid
 import os
 import pytz
@@ -24,13 +24,11 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Get API key from environment variable
 API_KEY = os.getenv("API_KEY")
 BQ_TABLE = os.getenv("BQ_TABLE")
 try:
     credentials_path = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
 
-    # Create credentials object
     credentials = service_account.Credentials.from_service_account_file(credentials_path)
     client = bigquery.Client(credentials=credentials)
 except:
@@ -39,10 +37,8 @@ except:
 try:
     initialize_app()
 except ValueError:
-    # Firebase already initialized
     pass
 
-# Security scheme
 security = HTTPBearer()
 
 # Initialize FastAPI app
@@ -54,7 +50,6 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*", "http://localhost:5173", "https://portfolio-backend-741957175071.asia-southeast2.run.app"],
@@ -63,8 +58,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize BigQuery client
-# Store for optimization results
 optimization_results = {}
 
 
@@ -72,7 +65,6 @@ class OptimizationRequest(BaseModel):
     start_date: str
     granularity: int
     user_id: str
-    volatility: float
 
     @field_validator('start_date')
     def validate_start_date(cls, v):
@@ -86,6 +78,27 @@ class OptimizationRequest(BaseModel):
     def validate_user_id(cls, v):
         if not v or not isinstance(v, str) or '@' not in v:
             raise ValueError("Invalid user_id format")
+        return v
+
+
+class OptimizationRequestV2(OptimizationRequest):
+    volatility: float
+    sector_limits: Optional[Dict[str, float]] = None
+
+    @field_validator('volatility')
+    def validate_volatility(cls, v):
+        if not 0 < v < 1:
+            raise ValueError("Volatility must be between 0 and 1")
+        return v
+
+    @field_validator('sector_limits')
+    def validate_sector_limits(cls, v):
+        if v is not None:
+            required_sectors = {'Financial', 'Technology', 'Energy', 'Healthcare', 'Industrial', 'Materials', 'Other'}
+            if not all(sector in v for sector in required_sectors):
+                raise ValueError(f"Missing required sectors. Required: {required_sectors}")
+            if not all(0 <= limit <= 1 for limit in v.values()):
+                raise ValueError("Sector limits must be between 0 and 1")
         return v
 
 
@@ -109,7 +122,29 @@ class OptimizationResult(BaseModel):
 
 def get_latest_allocation(generation_id: str) -> Dict[str, Any]:
     """
-    Get the latest allocation for a specific generation_id from BigQuery
+    Retrieve the most recent portfolio allocation for a specific generation ID from BigQuery.
+
+    Args:
+        generation_id (str): Unique identifier for the optimization generation
+
+    Returns:
+        Dict[str, Any]: Portfolio allocation data containing:
+            - status (str): Operation status ('success' or 'error')
+            - message (str): Status description
+            - portfolio_recommendation (List[Dict]): List of portfolio allocations
+                - ticker (str): Stock ticker
+                - allocation_percentage (float): Percentage allocation
+            - metadata (Dict): Additional information including:
+                - generation_id (str): Optimization generation ID
+                - user_id (str): User identifier
+                - start_date (str): Start date of optimization
+                - datapoints (int): Number of data points used
+                - created_at (str): Timestamp of creation
+
+    Raises:
+        HTTPException: If query fails or no data is found
+            - 404: If no allocation found for generation_id
+            - 500: If database query fails
     """
     query = f"""
     WITH latest_allocation AS (
@@ -128,29 +163,23 @@ def get_latest_allocation(generation_id: str) -> Dict[str, Any]:
     """
 
     try:
-        # Remove the job_config since we're using f-string
         query_job = client.query(query)
         results = query_job.result()
 
-        # Convert results to list to check if empty
         rows = list(results)
         if not rows:
             print(f"No results found for generation_id: {generation_id}")
             return None
 
         row = rows[0]
-
-        # Debug print the row data
         print(f"Found data: {row}")
 
-        # Get the last period's allocation from the allocation array
         allocation_array = row.allocation
         if not allocation_array:
             return None
 
         latest_period = allocation_array[-1]
 
-        # Format the portfolio recommendations
         portfolio_recommendations = [
             {
                 "ticker": alloc["ticker"],
@@ -180,19 +209,51 @@ def get_latest_allocation(generation_id: str) -> Dict[str, Any]:
         )
 
 
-def run_optimization_task(
+def run_optimization_task_v2(
         task_id: str,
-        request: OptimizationRequest,
+        request: Union[OptimizationRequest, OptimizationRequestV2],
 ) -> None:
     """
-    Run the optimization task and store results
+    Execute portfolio optimization task and store results in BigQuery.
+
+    Args:
+        task_id (str): Unique identifier for the optimization task
+        request (Union[OptimizationRequest, OptimizationRequestV2]): Optimization parameters
+            - OptimizationRequest: Basic request with default parameters
+            - OptimizationRequestV2: Advanced request with custom volatility and sector limits
+
+    Raises:
+        HTTPException:
+            - 500: If optimization fails or database operations fail
+
+    Notes:
+        - For OptimizationRequest, uses default volatility (0.5) and sector limits
+        - For OptimizationRequestV2, uses custom volatility and sector limits if provided
+        - Results are stored in both memory (optimization_results) and BigQuery
+        - Sends notification upon successful completion
     """
     try:
         logger.info(f"Running optimization for task_id: {task_id}")
+        volatility = 0.5  # 20% default volatility
+        sector_limits = {
+            'Financial': 0.5,
+            'Technology': 0.5,
+            'Energy': 0.5,
+            'Healthcare': 0.5,
+            'Industrial': 0.5,
+            'Materials': 0.5,
+            'Other': 0.5
+        }
+        if isinstance(request, OptimizationRequestV2):
+            volatility = request.volatility
+            if request.sector_limits:
+                sector_limits = request.sector_limits
+
         optimizer = run_optimization_pipeline(
             request.granularity,
-            request.volatility,
-            request.start_date
+            volatility,
+            request.start_date,
+            sector_limits
 
         )
 
@@ -204,7 +265,6 @@ def run_optimization_task(
             (results_df['ticker'] != 'LQ45')
             ]
 
-        # Prepare portfolio recommendations
         portfolio_recommendations = [
             {
                 "ticker": row['ticker'],
@@ -213,7 +273,6 @@ def run_optimization_task(
             for _, row in current_allocations.iterrows()
         ]
 
-        # Prepare data for BigQuery
         allocation_array = []
         for period, group in results_df.groupby('period'):
             allocation_details = [
@@ -237,7 +296,6 @@ def run_optimization_task(
         wib = pytz.timezone('Asia/Jakarta')
         current_timestamp = datetime.now(wib)
 
-        # Store results
         optimization_results[task_id] = {
             'status': 'success',
             'message': 'Optimization completed successfully',
@@ -252,7 +310,6 @@ def run_optimization_task(
             }
         }
 
-        # Prepare data for BigQuery
         data = [{
             'generation_id': task_id,
             'user_id': request.user_id,
@@ -263,7 +320,6 @@ def run_optimization_task(
             'allocation': allocation_array
         }]
 
-        # Save to BigQuery
         logger.info(f"Saving results to BigQuery for task_id: {task_id}")
         schema = [
             bigquery.SchemaField("generation_id", "STRING", mode="REQUIRED"),
@@ -356,7 +412,19 @@ def run_optimization_task(
 
 
 async def verify_token(x_api_key: str = Header(None, alias="X-API-key")) -> str:
-    """Verify the Bearer token from the request header."""
+    """
+    Verify API key from request header.
+
+    Args:
+        x_api_key (str, optional): API key from X-API-key header. Defaults to None.
+
+    Returns:
+        str: Validated API key
+
+    Raises:
+        HTTPException:
+            - 401: If API key is invalid or missing
+    """
     if x_api_key != API_KEY:
         raise HTTPException(
             status_code=401,
@@ -366,7 +434,20 @@ async def verify_token(x_api_key: str = Header(None, alias="X-API-key")) -> str:
 
 
 async def verify_firebase_token(authorization: str = Header(None)) -> dict:
-    """Verify Firebase ID token from Authorization header."""
+    """
+    Verify Firebase authentication token from request header.
+
+    Args:
+        authorization (str, optional): Authorization header containing Bearer token.
+            Must be in format "Bearer <token>". Defaults to None.
+
+    Returns:
+        dict: Decoded Firebase token containing user claims
+
+    Raises:
+        HTTPException:
+            - 401: If token is invalid, expired, or missing
+    """
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
 
@@ -389,7 +470,26 @@ async def verify_firebase_token(authorization: str = Header(None)) -> dict:
 
 def get_user_portfolio_history(user_id: str) -> Dict[str, Any]:
     """
-    Get user's portfolio history from BigQuery
+    Retrieve complete portfolio optimization history for a user from BigQuery.
+
+    Args:
+        user_id (str): User identifier (email format)
+
+    Returns:
+        Dict[str, Any]: Portfolio history containing:
+            - status (str): Operation status ('success' or 'error')
+            - message (str): Status description
+            - portfolio_history (List[Dict]): List of historical portfolios, each containing:
+                - generation_id (str): Optimization generation ID
+                - start_date (str): Start date of optimization
+                - datapoints (int): Number of data points used
+                - created_at (str): Creation timestamp
+                - optimized_portfolio_month (str): Month of optimization
+                - optimized_portfolio_allocation (List[Dict]): Portfolio allocations excluding benchmark
+
+    Raises:
+        HTTPException:
+            - 500: If database query fails
     """
     query = f"""
     SELECT *
@@ -456,7 +556,29 @@ def optimize(
         api_key: str = Depends(verify_token),
         # user_claims: dict = Depends(verify_firebase_token)
 ) -> Dict[str, Any]:
-    """Start portfolio optimization"""
+    """
+    Initialize portfolio optimization with default parameters.
+
+    Args:
+        request (OptimizationRequest): Basic optimization parameters including:
+            - start_date (str): Start date for optimization
+            - granularity (int): Number of days for optimization window
+            - user_id (str): User identifier
+        background_tasks (BackgroundTasks): FastAPI background tasks handler
+        api_key (str): API key from verify_token dependency
+        user_claims (dict): Firebase user claims from verify_firebase_token dependency
+
+    Returns:
+        Dict[str, Any]: Response containing:
+            - task_id (str): Unique identifier for the optimization task
+            - status (str): Initial task status ('processing')
+            - message (str): Status description
+
+    Raises:
+        HTTPException:
+            - 400: If optimization initialization fails
+            - 401: If API key validation fails
+    """
     try:
         task_id = str(uuid.uuid4())
         optimization_results[task_id] = {
@@ -464,9 +586,65 @@ def optimize(
             'message': 'Optimization in progress'
         }
         logger.info(
-            f"Optimization started for task_id: {task_id}, user_id: {request.user_id}, start_date: {request.start_date}, granularity: {request.granularity}")
+            f"Optimization with default params started for task_id: {task_id}, user_id: {request.user_id}, start_date: {request.start_date}, granularity: {request.granularity}")
         background_tasks.add_task(
-            run_optimization_task,
+            run_optimization_task_v2,
+            task_id,
+            request
+        )
+        return {
+            "task_id": task_id,
+            "status": "processing",
+            "message": "Optimization started"
+        }
+
+    except Exception as e:
+        logger.error(f"Error starting optimization: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/optimize/v2", response_model=OptimizationResponse)
+def optimize_v2(
+        request: OptimizationRequestV2,
+        background_tasks: BackgroundTasks,
+        api_key: str = Depends(verify_token),
+        # user_claims: dict = Depends(verify_firebase_token)
+) -> Dict[str, Any]:
+    """
+       Initialize portfolio optimization with custom parameters.
+
+       Args:
+           request (OptimizationRequestV2): Advanced optimization parameters including:
+               - start_date (str): Start date for optimization
+               - granularity (int): Number of days for optimization window
+               - user_id (str): User identifier
+               - volatility (float): Target portfolio volatility (0-1)
+               - sector_limits (Optional[Dict[str, float]]): Maximum allocation per sector
+           background_tasks (BackgroundTasks): FastAPI background tasks handler
+           api_key (str): API key from verify_token dependency
+           user_claims (dict): Firebase user claims from verify_firebase_token dependency
+
+       Returns:
+           Dict[str, Any]: Response containing:
+               - task_id (str): Unique identifier for the optimization task
+               - status (str): Initial task status ('processing')
+               - message (str): Status description
+
+       Raises:
+           HTTPException:
+               - 400: If optimization initialization fails
+               - 401: If API key validation fails
+       """
+    try:
+        task_id = str(uuid.uuid4())
+        optimization_results[task_id] = {
+            'status': 'processing',
+            'message': 'Optimization in progress'
+        }
+        logger.info(
+            f"Optimization with custom params started for task_id: {task_id}, user_id: {request.user_id}, start_date: {request.start_date}, granularity: {request.granularity}, volatility: {request.volatility}, sector_limits: {request.sector_limits}")
+        background_tasks.add_task(
+            run_optimization_task_v2,
             task_id,
             request
         )
@@ -484,10 +662,30 @@ def optimize(
 @app.get("/optimizers/{task_id}", response_model=OptimizationResult)
 def get_optimization_result(
         task_id: str,
-        # api_key: str = Depends(verify_token),
+        api_key: str = Depends(verify_token),
         user_claims: dict = Depends(verify_firebase_token)
 ) -> Dict[str, Any]:
-    """Get optimization results from BigQuery"""
+    """
+    Retrieve optimization results for a specific task.
+
+    Args:
+        task_id (str): Unique identifier for the optimization task
+        api_key (str): API key from verify_token dependency
+        user_claims (dict): Firebase user claims from token verification
+
+    Returns:
+        Dict[str, Any]: Optimization results containing:
+            - status (str): Task status
+            - message (str): Status description
+            - portfolio_recommendation (Optional[List[PortfolioAllocation]]):
+                Portfolio allocations if available
+            - metadata (Optional[Dict[str, Any]]): Additional task information
+
+    Raises:
+        HTTPException:
+            - 404: If task not found
+            - 401: If Firebase authentication fails
+    """
     print(f"Received request for task_id: {task_id}")
 
     result = get_latest_allocation(task_id)
@@ -506,7 +704,29 @@ def get_user_portfolios(
         api_key: str = Depends(verify_token),
         user_claims: dict = Depends(verify_firebase_token)
 ) -> Dict[str, Any]:
-    """Get all portfolio optimization history for a specific user"""
+    """
+    Retrieve complete portfolio optimization history for a specific user.
+
+    Args:
+        user_id (str): User identifier (email format)
+        api_key (str): API key from verify_token dependency
+        user_claims (dict): Firebase user claims from token verification
+    Returns:
+        Dict[str, Any]: Portfolio history containing:
+            - status (str): Operation status ('success' or 'error')
+            - message (str): Status description
+            - portfolio_history (List[Dict]): List of historical portfolios, each containing:
+                - generation_id (str): Optimization generation ID
+                - start_date (str): Start date of optimization
+                - datapoints (int): Number of data points used
+                - volatility (float): Target portfolio volatility
+                - created_at (str): Creation timestamp
+                - optimized_portfolio_month (str): Month of optimization
+                - optimized_portfolio_allocation (List[Dict]): Portfolio allocations excluding benchmark
+    Raises:
+        HTTPException:
+            - 400: If database query fails
+    """
     try:
         logger.info(f"Fetching portfolio history for user: {user_id}")
         result = get_user_portfolio_history(user_id)
@@ -520,7 +740,14 @@ def get_user_portfolios(
 def health_check(
         # api_key: str = Depends(verify_token)
 ) -> Dict[str, str]:
-    """Health check endpoint"""
+    """
+    Check API service health status.
+
+    Returns:
+        Dict[str, str]: Health status containing:
+            - status (str): Service status ('healthy')
+            - timestamp (str): Current timestamp in Asia/Jakarta timezone
+    """
     wib = pytz.timezone('Asia/Jakarta')
     return {
         'status': 'healthy',

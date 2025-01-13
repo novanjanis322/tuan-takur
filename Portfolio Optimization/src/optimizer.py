@@ -1,7 +1,7 @@
 import gurobipy as gp
 import numpy as np
 import pandas as pd
-from typing import Optional, Union
+from typing import Optional, Union, Dict
 from datetime import datetime, date
 from dateutil.relativedelta import relativedelta
 from gurobipy import GRB, quicksum
@@ -17,7 +17,24 @@ class PortfolioOptimizer:
     def __init__(self,
                  granularity: int,
                  start_date: Union[str, datetime, date],
-                 volatility: float) -> None:
+                 volatility: float,
+                 sector_limits: Optional[Dict[str, float]] = None) -> None:
+        """
+        Initialize PortfolioOptimizer with optimization parameters.
+
+        Args:
+            granularity (int): Number of days for the optimization window
+            start_date (Union[str, datetime, date]): Start date for optimization.
+                If string, must be in 'YYYY-MM-DD' format.
+            volatility (float): Maximum annual volatility target for the portfolio (e.g., 0.2 for 20%)
+
+        Attributes set:
+            start_date (str): Start date in 'YYYY-MM-DD' format
+            last_date (str): End of current period in 'YYYY-MM-DD' format
+            end_date (str): Final optimization date in 'YYYY-MM-DD' format
+            initial_capital (float): Initial investment amount
+            optimized_portfolio (pd.DataFrame): Empty DataFrame for optimization results
+        """
         load_dotenv()
 
         # Initialize Gurobi credentials
@@ -47,6 +64,8 @@ class PortfolioOptimizer:
 
         # Initialize data loader
         self.data_loader = DataLoader()
+
+        self.sector_limits = sector_limits
 
     def load_data(self) -> None:
         """
@@ -103,8 +122,14 @@ class PortfolioOptimizer:
         """
         Prepare data for backtesting by filtering the relevant date range.
 
-        Filters the stock data based on start_date and last_date, storing the
-        result in prep_backtesting_data_df.
+        Filters the stock data based on start_date and last_date. Only includes
+        data points that fall within this window.
+
+        Attributes set:
+            prep_backtesting_data_df (pd.DataFrame): Filtered DataFrame containing:
+                - date (str): Date in 'YYYY-MM-DD' format
+                - ticker (str): Stock ticker
+                - adj_close (float): Adjusted closing price
         """
         _df = self.df[
             (self.df["date"] >= self.start_date) &
@@ -176,13 +201,22 @@ class PortfolioOptimizer:
         """
         Prepare benchmark data for analysis.
 
-        Processes the LQ45 benchmark data by:
+        Processes the LQ45 benchmark data through the following steps:
         1. Converting dates to proper format
         2. Filtering based on start date
         3. Renaming columns for consistency
         4. Cleaning numerical data
 
-        Also generates benchmark PNL backtesting data.
+        Attributes set:
+            benchmark_df (pd.DataFrame): Processed benchmark data with columns:
+                - date (str): Date in 'YYYY-MM-DD' format
+                - adj_close (float): Adjusted closing price
+            benchmark_pnl_backtesting_df (pd.DataFrame): Benchmark PNL results with columns:
+                - period (str): Year-month in 'YYYY-MM' format
+                - datapoints (int): Number of data points
+                - ticker (str): Always 'LQ45'
+                - allocations (float): Always 1.0
+                - pnl_percentage (float): Monthly return percentage
         """
         benchmark_df = self.df_LQ45_benchmark.copy()
         # Handle the date conversion properly
@@ -212,11 +246,18 @@ class PortfolioOptimizer:
         """
         Prepare training data for optimization.
 
-        Filters and processes the stock data by:
+        Filters and processes the stock data through:
         1. Selecting data before start_date
         2. Sorting by ticker and date
         3. Limiting to specified granularity
         4. Filtering based on available tickers if not at end date
+
+        Attributes set:
+            training_data_df (pd.DataFrame): Processed training data with columns:
+                - date (str): Date in 'YYYY-MM-DD' format
+                - ticker (str): Stock ticker
+                - adj_close (float): Adjusted closing price
+                - row_number (int): Sequential number within each ticker group
         """
         _df = self.df[self.df["date"] < self.start_date].sort_values(
             by=["ticker", "date"], ascending=[True, False]
@@ -231,25 +272,31 @@ class PortfolioOptimizer:
         """
         Calculate the covariance matrix for portfolio optimization.
 
-        Processes the training data to:
-        1. Create a pivot table of adjusted closing prices
-        2. Handle missing values
-        3. Calculate returns and covariance matrix
-        4. Store processed tickers for later use
+        Processes the training data through:
+        1. Creating a pivot table of adjusted closing prices
+        2. Handling missing values
+        3. Calculating returns and covariance matrix
+        4. Computing volatility statistics
 
-        Sets self.cov_matrix and self.cov_matrix_val attributes.
+        Attributes set:
+            processed_tickers (set[str]): Set of tickers included in analysis
+            cov_matrix (pd.DataFrame): Covariance matrix of stock returns
+            cov_matrix_val (np.ndarray): Numpy array version of covariance matrix
+
+        Notes:
+            Prints volatility statistics including average, maximum, and minimum
+            annual stock volatilities.
         """
         _df = self.training_data_df.sort_values(by="date").drop_duplicates(
             subset=["date", "ticker"]
         )
         _df["sequential_index"] = _df.groupby("ticker").cumcount()
 
-        # Store the tickers being processed
         self.processed_tickers = set()
 
         _df_pivot = _df.pivot(index="sequential_index", columns="ticker", values="adj_close")
         _df_pivot = _df_pivot.dropna(how="all", axis=1)
-        _df_pivot = _df_pivot.ffill().bfill()
+        # _df_pivot = _df_pivot.ffill().bfill()
         monthly_returns = _df_pivot.pct_change().dropna()
         monthly_returns = monthly_returns.loc[:, (monthly_returns != 0).any(axis=0)]
 
@@ -272,13 +319,19 @@ class PortfolioOptimizer:
         """
         Calculate portfolio metrics and returns for optimization.
 
-        Processes the training data to:
-        1. Calculate monthly returns
-        2. Merge with industry data
-        3. Identify positive returns
-        4. Store stock names and returns
+        Processes the training data to compute various metrics and stores them
+        for use in the optimization model.
 
-        Also performs validation checks for ticker consistency.
+        Attributes set:
+            monthly_metrics_df (pd.DataFrame): DataFrame with monthly metrics
+            positive_returns (pd.DataFrame): Subset of stocks with positive returns
+            stock_names (List[str]): List of stock tickers
+            stock_returns (List[float]): List of corresponding returns
+            stock_industry (List[str]): List of industry classifications
+
+        Notes:
+            Performs validation checks for ticker consistency between
+            metrics and covariance matrix calculations.
         """
         _df = self.training_data_df.sort_values(by="date")
 
@@ -302,7 +355,6 @@ class PortfolioOptimizer:
             monthly_metrics, self.industry_df, on="ticker", how="left"
         )
 
-        # Add validation checks
         if len(monthly_metrics["ticker"].unique()) != len(self.processed_tickers):
             print(f"Warning: Mismatch in ticker counts:")
             print(f"Monthly metrics tickers: {len(monthly_metrics['ticker'].unique())}")
@@ -346,18 +398,29 @@ class PortfolioOptimizer:
 
     def verify_portfolio_risk(self):
         """
-        Comprehensive portfolio risk verification.
+        Perform comprehensive portfolio risk verification.
+
+        Calculates and prints detailed risk analytics including:
+        1. Portfolio-level volatility
+        2. Individual stock contributions to risk
+        3. Risk decomposition by position
+
+        Returns:
+            float: Annualized portfolio volatility as a decimal
+                (e.g., 0.15 represents 15% volatility)
+
+        Notes:
+            Prints detailed risk analysis including weights, individual
+            volatilities, and risk contributions for each position.
         """
         portfolio_weights = np.array([self.allocations[stock].X for stock in self.stock_names])
 
-        # Calculate portfolio volatility
         portfolio_variance = portfolio_weights.T @ self.cov_matrix_val @ portfolio_weights
         portfolio_volatility = np.sqrt(portfolio_variance)
 
         print("\nPortfolio Risk Analysis:")
         print(f"Annual Portfolio Volatility: {portfolio_volatility * 100:.2f}%")
 
-        # Calculate and show risk decomposition
         print("\nRisk Decomposition:")
         total_risk = 0
         for i, (stock, weight) in enumerate(zip(self.stock_names, portfolio_weights)):
@@ -374,6 +437,60 @@ class PortfolioOptimizer:
         print(f"Portfolio Volatility: {portfolio_volatility * 100:.2f}%")
 
         return portfolio_volatility
+
+    def create_sector_mapping(self) -> dict:
+        """
+        Create a mapping of industries to broader sectors using keyword matching.
+
+        Maps each industry to one of the following sectors:
+        - Financial
+        - Technology
+        - Energy
+        - Healthcare
+        - Industrial
+        - Materials
+        - Other (default for unmatched industries)
+
+        Returns:
+            Dict[str, str]: Dictionary mapping industry names (keys) to
+                sector classifications (values)
+
+        Notes:
+            Uses keyword matching to categorize industries. Industries that
+            don't match any sector keywords are classified as 'Other'.
+            Logs the final mapping for review.
+        """
+        sector_keywords = {
+            'Financial': ['bank', 'insurance', 'capital', 'financial', 'invest', 'credit', 'fund', 'securities'],
+            'Technology': ['tech', 'software', 'computer', 'semiconductor', 'electronic', 'digital', 'media', 'telecom'],
+            'Energy': ['oil', 'gas', 'energy', 'coal', 'mine', 'utility', 'power'],
+            'Healthcare': ['health', 'hospital', 'pharma', 'medical', 'drug', 'biotech'],
+            'Industrial': ['industry', 'manufacture', 'construct', 'machinery', 'equipment', 'engineering'],
+            'Materials': ['material', 'chemical', 'steel', 'cement', 'paper', 'mineral', 'metal']
+        }
+
+        unique_industries = set(self.industry_df['industry'].dropna())
+
+        industry_to_sector = {}
+
+        for industry in unique_industries:
+            if pd.isna(industry):
+                industry_to_sector[industry] = 'Other'
+                continue
+
+            industry_lower = str(industry).lower()
+            matched_sector = 'Other'
+
+            for sector, keywords in sector_keywords.items():
+                if any(keyword in industry_lower for keyword in keywords):
+                    matched_sector = sector
+                    break
+
+            industry_to_sector[industry] = matched_sector
+
+        logger.info("Industry to Sector mapping created:")
+        logger.info(industry_to_sector)
+        return industry_to_sector
 
     def define_optimization_model(self) -> None:
         """
@@ -409,7 +526,6 @@ class PortfolioOptimizer:
         )
 
         target_annual_volatility = self.volatility
-        # self.volatility = target_annual_volatility
         risk_expression = quicksum(
             self.cov_matrix_val[i][j] * allocations[stock_i] * allocations[stock_j]
             for i, stock_i in enumerate(self.stock_names)
@@ -443,24 +559,23 @@ class PortfolioOptimizer:
             quicksum(allocations[stock] for stock in self.stock_names) == 1,
             "TotalInvestment",
         )
-        self.model.addConstr(
-            quicksum(select_vars[stock] for stock in self.stock_names) >= 2,
-            "MinStocks"
-        )
+
         self.model.addConstr(
             quicksum(select_vars[stock] for stock in self.stock_names) <= int(1 / min_allocation),
             "MaxStocks"
         )
 
-        self.model.addConstr(
-            quicksum(
-                allocations[row["ticker"]]
-                for _, row in self.positive_returns.iterrows()
-                if row["industry"] == "Banks - Regional"
-            )
-            >= 0.1,
-            "MinBanksRegional",
-        )
+        sector_mapping = self.create_sector_mapping()
+        stock_sectors = [sector_mapping.get(industry, 'Other') for industry in self.stock_industry]
+
+        for sector, limit in self.sector_limits.items():
+            sector_stocks = [stock for i, stock in enumerate(self.stock_names) if stock_sectors[i] == sector]
+            if sector_stocks:
+                self.model.addConstr(
+                    quicksum(allocations[stock] for stock in sector_stocks) <= limit,
+                    name=f"Sector_Limit_{sector}"
+                )
+
         self.allocations = allocations
         self.select_vars = select_vars
 
@@ -481,15 +596,22 @@ class PortfolioOptimizer:
         Process and store optimization results.
 
         Extracts optimal portfolio weights and corresponding PNL percentages
-        for stocks with allocation > 0.5%. Results are stored in the optimized_portfolio
-        DataFrame with columns:
-            - period: Year-month of the optimization
-            - datapoints: Number of days in granularity
-            - ticker: Stock symbol
-            - allocations: Portfolio weight (0-1)
-            - pnl_percentage: Profit/Loss percentage
+        for positions with allocation > 0.5%. Only processes results if an
+        optimal solution is found (model.status == GRB.OPTIMAL).
 
-        Only processes results if optimal solution is found.
+        Attributes set:
+            optimized_portfolio (pd.DataFrame): Updated with new results containing:
+                - period (str): Year-month of optimization
+                - datapoints (int): Number of days in granularity
+                - risk (float): Target volatility
+                - ticker (str): Stock symbol
+                - industry (str): Industry classification
+                - allocations (float): Portfolio weight (0-1)
+                - pnl_percentage (float): Profit/Loss percentage
+
+        Notes:
+            Prints optimization status and portfolio allocation summary.
+            If no optimal solution is found, prints failure message with model status.
         """
         if self.model.status == GRB.OPTIMAL:
             new_rows = []
@@ -564,12 +686,14 @@ class PortfolioOptimizer:
         3. Computing end-of-period values
         4. Comparing portfolio performance with benchmark
 
-        The results are stored in self.final_result DataFrame with additional columns:
-            - allocations_idr: Position size in IDR
-            - pnl_idr: Profit/Loss in IDR
-            - end_of_period_value: Position value at period end
-
-        Uses initial_capital as the starting portfolio value.
+        Attributes set:
+            final_result (pd.DataFrame): Combined results containing:
+                - All columns from optimized_portfolio
+                - allocations_idr (int): Position size in IDR
+                - pnl_idr (int): Profit/Loss in IDR
+                - end_of_period_value (int): Position value at period end
+                Both portfolio and benchmark results are included, sorted by
+                period and ticker.
         """
         df_backtesting = [self.optimized_portfolio, self.benchmark_pnl_backtesting_df]
         for df in df_backtesting:
@@ -648,7 +772,8 @@ class PortfolioOptimizer:
 
 def run_optimization_pipeline(granularity: int,
                               volatility: float,
-                              start_date: Optional[Union[str, datetime]] = None) -> 'PortfolioOptimizer':
+                              start_date: Optional[Union[str, datetime]] = None,
+                              sector_limits: Optional[Dict[str, float]] = None) -> 'PortfolioOptimizer':
     """
     Run the complete portfolio optimization pipeline.
 
@@ -658,6 +783,7 @@ def run_optimization_pipeline(granularity: int,
             Can be either a string in 'YYYY-MM-DD' format or a datetime object.
             If None, defaults to first day of previous month. Defaults to None.
         volatility: Maximum annual volatility for the portfolio
+        sector_limits: Dictionary of sector limits for portfolio allocation
 
     Returns:
         PortfolioOptimizer: Optimized portfolio instance containing the results
@@ -680,7 +806,7 @@ def run_optimization_pipeline(granularity: int,
     elif isinstance(start_date, (datetime, date)):
         start_date = start_date.strftime('%Y-%m-%d')
 
-    optimizer = PortfolioOptimizer(granularity, start_date, volatility)
+    optimizer = PortfolioOptimizer(granularity, start_date, volatility, sector_limits)
     optimizer.load_data()
     optimizer.prepare_benchmark_data()
     logger.info(f"loading data for {optimizer.start_date} has been completed")
