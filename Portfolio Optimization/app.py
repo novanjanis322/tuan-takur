@@ -234,18 +234,19 @@ def run_optimization_task_v2(
     """
     try:
         logger.info(f"Running optimization for task_id: {task_id}")
-        volatility = 0.5  # 20% default volatility
+        volatility = 0.8
         sector_limits = {
-            'Financial': 0.5,
-            'Technology': 0.5,
-            'Energy': 0.5,
-            'Healthcare': 0.5,
-            'Industrial': 0.5,
-            'Materials': 0.5,
-            'Other': 0.5
+            'Financial': 1,
+            'Technology': 1,
+            'Energy': 1,
+            'Healthcare': 1,
+            'Industrial': 1,
+            'Materials': 1,
+            'Other': 1
         }
         if isinstance(request, OptimizationRequestV2):
-            volatility = request.volatility
+            if request.volatility:
+                volatility = request.volatility
             if request.sector_limits:
                 sector_limits = request.sector_limits
 
@@ -305,7 +306,7 @@ def run_optimization_task_v2(
                 'user_id': request.user_id,
                 'start_date': request.start_date,
                 'datapoints': request.granularity,
-                'volatility': request.volatility,
+                'volatility': volatility,
                 'created_at': current_timestamp.isoformat()
             }
         }
@@ -315,7 +316,7 @@ def run_optimization_task_v2(
             'user_id': request.user_id,
             'starting_date': request.start_date,
             'datapoints': request.granularity,
-            'volatility': request.volatility,
+            'volatility': volatility,
             'created_at': current_timestamp.isoformat(),
             'allocation': allocation_array
         }]

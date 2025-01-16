@@ -1,0 +1,8 @@
+data
+tests
+.gitignore
+.env
+.env.example
+Dockerfile_distroless_UV_multistage
+Dockerfile_multistage_distroless_noUV
+#requirements.txt

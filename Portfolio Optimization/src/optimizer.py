@@ -544,7 +544,7 @@ class PortfolioOptimizer:
             )
 
         min_allocation = 0.01
-        max_allocation = 0.3
+        max_allocation = 0.5
         for stock in self.stock_names:
             self.model.addConstr(
                 allocations[stock] <= max_allocation * select_vars[stock],
