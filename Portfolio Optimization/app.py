@@ -222,13 +222,27 @@ class OptimizationService:
         """
         try:
             job_id = str(uuid.uuid4())
+            volatility = 0.8
+            sector_limits = {
+                'Financial': 1,
+                'Technology': 1,
+                'Energy': 1,
+                'Healthcare': 1,
+                'Industrial': 1,
+                'Materials': 1,
+                'Other': 1
+            }
+            if request.volatility:
+                volatility = request.volatility
+            if request.sector_limits:
+                sector_limits = request.sector_limits
 
             message_data = {
                 "job_id": job_id,
                 "start_date": request.start_date,
                 "granularity": request.granularity,
-                "volatility": request.volatility,
-                "sector_limits": request.sector_limits,
+                "volatility": volatility,
+                "sector_limits": sector_limits,
                 "user_id": request.user_id
             }
             future = self.publisher.publish(
@@ -430,7 +444,7 @@ async def optimize_v2(
 
     except Exception as e:
         logger.error(f"Error in submitting optimization: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.get("/optimizers/{task_id}", response_model=OptimizationResult)
