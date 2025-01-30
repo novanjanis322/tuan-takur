@@ -17,7 +17,6 @@ import pytz
 import granian
 import logging
 
-from src.optimizer import run_optimization_pipeline
 from src.utils.validators import *
 
 load_dotenv()
@@ -33,6 +32,7 @@ try:
 
     credentials = service_account.Credentials.from_service_account_file(credentials_path)
     client = bigquery.Client(credentials=credentials)
+
 except:
     client = bigquery.Client()
 
@@ -310,9 +310,6 @@ async def verify_firebase_token(authorization: str = Header(None)) -> dict:
     except auth.InvalidIdTokenError as e:
         logger.error(f"Invalid ID Token: {str(e)}")
         raise HTTPException(status_code=401, detail="Invalid Firebase token")
-    except auth.ExpiredIdTokenError as e:
-        logger.error(f"Expired ID Token: {str(e)}")
-        raise HTTPException(status_code=401, detail="Firebase token has expired")
     except Exception as e:
         logger.error(f"Unexpected Firebase token verification error: {str(e)}")
         raise HTTPException(status_code=401, detail=f"Token verification failed: {str(e)}")
@@ -399,8 +396,9 @@ def get_optimization_service() -> OptimizationService:
 @app.get("/")
 def read_root():
     return {"Status": "OK",
-            "Message": "Welcome to Portfolio Optimization API (25-01-15.01)"
+            "Message": "Welcome to Portfolio Optimization API (25-01-30.01)"
             }
+
 
 @app.post("/optimize/v2", response_model=OptimizationResponse)
 async def optimize_v2(

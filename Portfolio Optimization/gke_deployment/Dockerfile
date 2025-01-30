@@ -1,15 +1,13 @@
 FROM python:3.11-slim AS build-env
 WORKDIR /app
 
-# Install UV
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
-# Copy your application files
-COPY app.py .
+COPY gke_deployment/app.py .
 COPY src/ src/
-COPY pyproject.toml .
-COPY uv.lock .
-# Create virtual environment and sync dependencies with UV
+COPY gke_deployment/pyproject.toml .
+COPY gke_deployment/uv.lock .
+
 RUN python -m venv /opt/venv \
 && . /opt/venv/bin/activate \
 && uv sync --frozen --no-cache \

@@ -8,3 +8,7 @@ __pycache__/
 venv/
 tests/*
 application_default_credentials.json
+gke_deployment/configmap.yaml
+gke_deployment/deployment.yaml
+gke_deployment/keda-scaledobject.yaml
+gke_deployment/pdb.yaml
