@@ -1,0 +1,19 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: optimization-gke-scaler
+spec:
+  scaleTargetRef:
+    name: optimization-gke
+    kind: Deployment
+  pollingInterval: 30
+  cooldownPeriod: 60
+  minReplicaCount: 0
+  maxReplicaCount: 10
+  triggers:
+  - type: gcp-pubsub
+    metadata:
+      subscriptionName: ${PUBSUB_SUBSCRIPTION_PATH}
+      mode: SubscriptionSize
+      value: "1"
+      podIdentity: workload-identity

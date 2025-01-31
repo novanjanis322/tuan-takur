@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: optimization-gke
+  labels:
+      app: optimization-gke
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: optimization-gke
+  template:
+    metadata:
+      labels:
+        app: optimization-gke
+      annotations:
+        iam.gke.io/gcp-service-account: ${GCP_SERVICE_ACCOUNT}
+    spec:
+      serviceAccountName: ${K8S_SERVICE_ACCOUNT}
+      terminationGracePeriodSeconds: 60
+      containers:
+      - name: optimization-gke
+        image: ${CONTAINER_REGISTRY}/optimization-gke:latest
+        resources:
+          requests:
+            cpu: "1"
+            memory: "2Gi"
+          limits:
+            cpu: "2"
+            memory: "4Gi"
+        envFrom:
+        - configMapRef:
+            name: optimizer-config
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 15
+          periodSeconds: 10
