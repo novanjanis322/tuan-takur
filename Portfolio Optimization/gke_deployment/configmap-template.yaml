@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: optimizer-config
+data:
+  GOOGLE_CLOUD_PROJECT: "${GCP_PROJECT}"
+  PUBSUB_SUBSCRIPTION: "${PUBSUB_SUB}"
+  BQ_TABLE: "${BQ_TABLE_NAME}"
+  WLS_ACCESS_ID: "${WLS_ACCESS_ID}"
+  WLS_SECRET: "${WLS_SECRET}"
+  LICENSE_ID: "${LICENSE_ID}"
+  

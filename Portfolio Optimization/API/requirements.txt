@@ -1,0 +1,9 @@
+google-cloud-bigquery
+google-cloud-pubsub
+python-dateutil
+python-dotenv
+fastapi
+firebase-admin
+granian
+pytz
+pydantic

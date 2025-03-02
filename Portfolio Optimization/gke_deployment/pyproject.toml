@@ -1,0 +1,29 @@
+[project]
+name = "portfolio_optimizatiom"
+version = "0.1.0"
+description = "a program that runs mathematical optimization to generate portfolio recommendation"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "gurobipy",
+    "pandas==2.2.2",
+    "google-cloud-bigquery==3.26.0",
+    "google-cloud-pubsub",
+    "python-dotenv",
+    "python-dateutil",
+    "fastapi[all]",
+    "pydantic",
+    "granian",
+    "pytz",
+    "db-dtypes",
+    "yfinance",
+    "firebase-admin"
+]
+
+#[project.optional-dependencies]
+#dev = [
+#    "pytest",
+#    "black",
+#    "isort",
+#    "mypy",
+#]
