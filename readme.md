@@ -40,3 +40,8 @@ The API returns a portfolio recommendation containing:
 -   **Message**: A descriptive message about the task status.
 -   **Portfolio Allocation**: A list of recommended stock allocations, including the ticker symbol and allocation percentage.
 -   **Metadata**: Additional information about the optimization, such as the start date, data points, and creation timestamp.
+
+
+Here's one of the portfolio optimization performance result in a 5-year backtesting simulation:
+![image](https://github.com/user-attachments/assets/efce3c77-d2b5-4bdd-83a2-b8334af16694)
+
