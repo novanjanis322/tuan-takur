@@ -7,25 +7,58 @@ from dateutil.relativedelta import relativedelta
 from pathlib import Path
 from typing import Optional
 
-from .settings import RAW_DATA_DIR
+from .settings import RAW_DATA_DIR, LOCAL_DATA_DIR, DATA_SOURCE, ROOT_DIR, UNIVERSE_FILE
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class DataLoader:
-    def __init__(self, cache_dir: Path = Path('data/cache')):
+    def __init__(self, cache_dir: Path = Path('data/cache'), source: str = DATA_SOURCE):
         """
         Initialize DataLoader with BigQuery client and cache directory.
 
         Args:
             cache_dir (Path, optional): Directory for caching data.
                 Defaults to 'data/cache'.
+            source (str, optional): "bigquery" or "local". Local reads the files
+                written by scripts/ingest_idx_data.py. Defaults to DATA_SOURCE.
         """
-        logger.info(f"Initializing DataLoader with cache directory: {cache_dir}")
-        self.client = bigquery.Client()
+        logger.info(f"Initializing DataLoader (source={source}) with cache directory: {cache_dir}")
+        self.source = source
+        self.client = bigquery.Client() if source == "bigquery" else None
         self.cache_dir = cache_dir
         self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.universe = None
+        if source == "local" and UNIVERSE_FILE:
+            universe_path = Path(UNIVERSE_FILE)
+            if not universe_path.is_absolute():
+                universe_path = ROOT_DIR / universe_path
+            self.universe = set(pd.read_csv(universe_path)["ticker"])
+            logger.info(f"Universe limited to {len(self.universe)} tickers from {universe_path}")
         logger.info("DataLoader initialization complete")
+
+    def _apply_universe(self, df: pd.DataFrame) -> pd.DataFrame:
+        if self.universe is None:
+            return df
+        return df[df["ticker"].isin(self.universe)].reset_index(drop=True)
+
+    def _load_local_stock_data(self, start_date: str) -> pd.DataFrame:
+        """
+        Read local prices with the same window as the BigQuery query:
+        3 years of history before start_date up to the 1st of the current
+        Jakarta month. Unchanged-price days are kept (they are real zero returns).
+        """
+        path = LOCAL_DATA_DIR / "adj_close_price.csv"
+        logger.info(f"Loading local stock data: {path}")
+        df = self._apply_universe(pd.read_csv(path, dtype={"date": str, "ticker": str, "adj_close": float}))
+
+        start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+        date_query = (start_dt - relativedelta(years=3)).strftime('%Y-%m-%d')
+        cutoff = pd.Timestamp.now(tz="Asia/Jakarta").replace(day=1).strftime('%Y-%m-%d')
+        df = df[(df["date"] >= date_query) & (df["date"] < cutoff)]
+        df = df.sort_values(["ticker", "date"]).reset_index(drop=True)
+        logger.info(f"Local stock data: {len(df)} rows, {df['ticker'].nunique()} tickers")
+        return df
 
     def _get_cache_path(self, start_date: str) -> Path:
         """
@@ -98,6 +131,9 @@ class DataLoader:
             logger.error("start_date cannot be None or empty")
             raise ValueError("start_date cannot be None or empty")
 
+        if self.source == "local":
+            return self._load_local_stock_data(start_date)
+
         cached_data = self._load_from_cache(start_date)
         if cached_data is not None:
             logger.info("Using cached stock data")
@@ -107,29 +143,17 @@ class DataLoader:
         start_dt = datetime.strptime(start_date, '%Y-%m-%d')
         date_query = (start_dt - relativedelta(years=3)).strftime('%Y-%m-%d')
         logger.debug(f"Query date range: {date_query} to current")
+        # Unchanged-price days are kept: dropping them misaligns return series across tickers
         query = f"""
-          WITH get_data AS (
-            SELECT
-              *,
-              ROW_NUMBER() OVER (PARTITION BY ticker, DATE_TRUNC(`date`, MONTH) ORDER BY `date`) AS row_num
-            FROM
-              km-data-dev.L0_yahoofinance.adj_close_price
-            WHERE
-              `date` >= '{date_query}'
-              AND `date` < DATE_TRUNC(CURRENT_DATE('Asia/Jakarta'), MONTH)
-            ORDER BY
-              ticker, date
-          )
           SELECT
-            *
+            `date`, ticker, adj_close
           FROM
-            get_data
-          QUALIFY
-            row_num = 1 OR adj_close != LAG(adj_close) OVER (
-              PARTITION BY ticker ORDER BY `date`
-            )
+            km-data-dev.L0_yahoofinance.adj_close_price
+          WHERE
+            `date` >= '{date_query}'
+            AND `date` < DATE_TRUNC(CURRENT_DATE('Asia/Jakarta'), MONTH)
           ORDER BY
-            ticker, date ASC;
+            ticker, `date` ASC;
           """
         logger.debug("Executing BigQuery query")
         df = self.client.query(query).to_dataframe()
@@ -157,6 +181,11 @@ class DataLoader:
             Exception: If there's an error querying BigQuery or processing data
         """
         logger.info("Loading industry data")
+        if self.source == "local":
+            return self._apply_universe(
+                pd.read_csv(LOCAL_DATA_DIR / "info.csv", dtype={"ticker": str, "industry": str})
+            )
+
         cache_path = self.cache_dir / "industry_data.csv"
 
         if cache_path.exists():
@@ -193,6 +222,11 @@ class DataLoader:
                 - Price (float): Daily benchmark closing price
         """
         logger.info("Loading benchmark data")
+        if self.source == "local":
+            df = pd.read_csv(RAW_DATA_DIR / "benchmark_lq45.csv")
+            df['Date'] = pd.to_datetime(df['Date']).dt.strftime('%Y-%m-%d')
+            return df.sort_values('Date').reset_index(drop=True)[['Date', 'Price']]
+
         cache_path = self.cache_dir / f"benchmark_data_{start_date}.csv"
         current_date = pd.Timestamp.now()
 

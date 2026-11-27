@@ -1,8 +1,9 @@
+import json
 import logging
 import argparse
 
 from src.optimizer import run_optimization_pipeline
-from typing import Tuple
+from typing import Dict, Tuple
 from src.settings import PROCESSED_DATA_DIR
 from src.utils.validators import dateUtil
 from datetime import datetime
@@ -16,7 +17,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def get_user_inputs() -> Tuple[str, int]:
+def get_user_inputs() -> Tuple[str, int, float, Dict[str, float]]:
     """
     Get and validate user inputs for optimization parameters.
 
@@ -43,7 +44,19 @@ def get_user_inputs() -> Tuple[str, int]:
     parser.add_argument(
         '--granularity',
         type=int,
-        help='Granularity in days'
+        help='Trading days in the training window (default 30)'
+    )
+    parser.add_argument(
+        '--volatility',
+        type=float,
+        default=0.2,
+        help='Maximum annual portfolio volatility, e.g. 0.2 for 20%% (default 0.2)'
+    )
+    parser.add_argument(
+        '--sector-limits',
+        type=json.loads,
+        default={},
+        help='JSON map of sector to max weight, e.g. \'{"Financial": 0.4}\''
     )
 
     args = parser.parse_args()
@@ -82,7 +95,7 @@ def get_user_inputs() -> Tuple[str, int]:
             logger.info("Using default granularity of 30 days")
             granularity = 30
 
-    return start_date, granularity
+    return start_date, granularity, args.volatility, args.sector_limits
 
 
 def main() -> None:
@@ -106,15 +119,17 @@ def main() -> None:
 
     try:
         # Get validated inputs
-        start_date, granularity = get_user_inputs()
+        start_date, granularity, volatility, sector_limits = get_user_inputs()
 
         logger.info(f"Starting optimization from {start_date} "
-                    f"with granularity {granularity}")
+                    f"with granularity {granularity}, volatility {volatility}")
 
         # Run optimization pipeline
         optimizer = run_optimization_pipeline(
             granularity=granularity,
-            start_date=start_date
+            volatility=volatility,
+            start_date=start_date,
+            sector_limits=sector_limits
         )
         results_df = optimizer.final_result
         current_timestamp = datetime.now()
