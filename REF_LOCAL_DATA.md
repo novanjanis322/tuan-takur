@@ -84,7 +84,7 @@ LQ45 result, 2021-01 to 2026-10, g=30, vol=0.2 (`data/processed/comparison_lq45.
 - Rolling 12-month realised volatility after the fixes: median 23.9%. It stays above the target because of the noisy 30-day sample covariance (N=45 > T=29).
 
 ## Covariance shrinkage (2026-11-27)
-- `src/covariance.py`: `estimate_covariance(returns, method)`, where method is `ledoit_wolf_cc` (Ledoit & Wolf 2003, constant-correlation target, analytic intensity δ = clip((π−ρ)/γ / T, 0, 1)) or `sample`. It returns `(cov, delta)` in the input's units; `calculate_cov_matrix` annualises with ×252.
+- `src/covariance.py`: `estimate_covariance(returns, method)`, where method is `ledoit_wolf_cc` (Ledoit & Wolf 2004, J. Portfolio Management 30(4), constant-correlation target, analytic intensity δ = clip((π−ρ)/γ / T, 0, 1)) or `sample`. It returns `(cov, delta)` in the input's units; `calculate_cov_matrix` annualises with ×252.
 - `settings.COV_ESTIMATOR` (env var, default `ledoit_wolf_cc`).
 - The results CSV gains `ex_ante_volatility` (√(w'Σw) of the solved weights) and `shrinkage_intensity`, both 0 / the month's δ for CASH rows. `summarize_run.py` reports `risk_forecast.bias_statistic` = std(r_t / (σ_t/√12)), where 1.0 means an unbiased forecast.
 - Simulation check (1-factor model, N=45, T=29, 300 trials): δ is about 0.91; relative Frobenius error 0.63 (sample) vs 0.36 (LW); min-variance true/believed vol 2.33 vs 1.39; δ=0.03 at T=5000. The shrunk matrix is always positive definite.

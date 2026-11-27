@@ -1,8 +1,8 @@
 """
 Covariance estimators for the algorithm.
 
-ledoit_wolf_cc: Ledoit & Wolf (2003), "Honey, I Shrunk the Sample Covariance
-Matrix". Shrinks the sample covariance toward a constant-correlation target
+ledoit_wolf_cc: Ledoit & Wolf (2004), "Honey, I Shrunk the Sample Covariance
+Matrix", Journal of Portfolio Management 30(4). Shrinks the sample covariance toward a constant-correlation target
 (each stock keeps its own variance; every pair gets the average correlation),
 with the shrinkage intensity estimated from the data.
 """
