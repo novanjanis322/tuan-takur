@@ -45,11 +45,13 @@ class PortfolioOptimizer:
         self.granularity = granularity
         self.volatility = volatility
 
-        # Convert dates to string format
+        # Periods are calendar months, so the start is always the 1st of a month
         if isinstance(start_date, (datetime, date)):
-            self.start_date = start_date.strftime('%Y-%m-%d')
-        else:
-            self.start_date = start_date
+            start_date = start_date.strftime('%Y-%m-%d')
+        requested_dt = datetime.strptime(start_date, '%Y-%m-%d')
+        if requested_dt.day != 1:
+            logger.warning(f"start_date {start_date} moved to the 1st of the month")
+        self.start_date = requested_dt.replace(day=1).strftime('%Y-%m-%d')
         self.static_start_date = self.start_date
 
         # Calculate last date
@@ -58,6 +60,10 @@ class PortfolioOptimizer:
 
         # Calculate end date
         self.end_date = datetime.today().replace(day=1).strftime('%Y-%m-%d')
+        if self.start_date > self.end_date:
+            raise ValueError(f"start_date {self.start_date} is after the current month {self.end_date}")
+        if granularity < 3:
+            raise ValueError("granularity must be at least 3 trading days")
 
         self.initial_capital = INITIAL_CAPITAL
         self.optimized_portfolio = pd.DataFrame()
@@ -65,7 +71,7 @@ class PortfolioOptimizer:
         # Initialize data loader
         self.data_loader = DataLoader()
 
-        self.sector_limits = sector_limits
+        self.sector_limits = sector_limits or {}
 
     def load_data(self) -> None:
         """
@@ -122,20 +128,26 @@ class PortfolioOptimizer:
         """
         Prepare data for backtesting by filtering the relevant date range.
 
-        Filters the stock data based on start_date and last_date. Only includes
-        data points that fall within this window.
+        The holding-period return runs from the last close before start_date
+        (previous month-end) to the last close before last_date, so the move
+        across the month boundary is counted.
 
         Attributes set:
-            prep_backtesting_data_df (pd.DataFrame): Filtered DataFrame containing:
-                - date (str): Date in 'YYYY-MM-DD' format
+            prep_backtesting_data_df (pd.DataFrame): One row per ticker with:
                 - ticker (str): Stock ticker
-                - adj_close (float): Adjusted closing price
+                - open_price (float): Last close before start_date
+                - close_price (float): Last close inside the period
         """
-        _df = self.df[
-            (self.df["date"] >= self.start_date) &
-            (self.df["date"] < self.last_date)
-            ]
-        self.prep_backtesting_data_df = _df
+        _df = self.df.sort_values("date")
+        open_price = _df[_df["date"] < self.start_date].groupby("ticker")["adj_close"].last()
+        in_period = _df[(_df["date"] >= self.start_date) & (_df["date"] < self.last_date)]
+        close_price = in_period.groupby("ticker")["adj_close"].last()
+        self.prep_backtesting_data_df = (
+            pd.DataFrame({"open_price": open_price, "close_price": close_price})
+            .dropna()
+            .rename_axis("ticker")
+            .reset_index()
+        )
 
     def pnl_backtesting_simulation(self, is_benchmark: bool = False) -> Optional[pd.DataFrame]:
         """
@@ -160,20 +172,21 @@ class PortfolioOptimizer:
             ['period', 'datapoints', 'ticker', 'allocations', 'pnl_percentage']
         """
         if is_benchmark:
-            _df = self.benchmark_df.copy()
-            _df['date'] = pd.to_datetime(_df['date'])
+            # Month-end to month-end, starting from the month-end before static_start_date
+            closes = (
+                self.benchmark_df.assign(date=pd.to_datetime(self.benchmark_df["date"]))
+                .set_index("date")["adj_close"]
+                .resample("ME").last()
+                .dropna()
+            )
+            _df = pd.DataFrame({
+                "date": closes.index,
+                "open_price": closes.shift(1).values,
+                "close_price": closes.values,
+            })
+            _df = _df[_df["date"] >= pd.to_datetime(self.static_start_date)].dropna()
         else:
             _df = self.prep_backtesting_data_df.copy()
-
-        # Use resample for benchmark, groupby for portfolio
-        _df = (
-            (_df.resample('ME', on='date') if is_benchmark else _df.groupby("ticker"))
-            .agg(
-                open_price=("adj_close", "first"),
-                close_price=("adj_close", "last")
-            )
-            .reset_index()
-        )
 
         # Calculate monthly returns
         _df["monthly_return (%)"] = round(
@@ -221,10 +234,8 @@ class PortfolioOptimizer:
         benchmark_df = self.df_LQ45_benchmark.copy()
         # Handle the date conversion properly
         benchmark_df['Date'] = pd.to_datetime(benchmark_df['Date'])
-        _df = benchmark_df[
-            (benchmark_df['Date'] >= pd.to_datetime(self.start_date)) &
-            (benchmark_df['Date'] < pd.to_datetime(self.end_date))
-            ]
+        # Keep history before start_date: the first month's return needs the prior month-end close
+        _df = benchmark_df[benchmark_df['Date'] < pd.to_datetime(self.end_date)]
 
         # Select and rename columns
         _df = _df[['Date', 'Price']].copy()
@@ -246,27 +257,19 @@ class PortfolioOptimizer:
         """
         Prepare training data for optimization.
 
-        Filters and processes the stock data through:
-        1. Selecting data before start_date
-        2. Sorting by ticker and date
-        3. Limiting to specified granularity
-        4. Filtering based on available tickers if not at end date
+        The window is the last `granularity` trading dates before start_date,
+        shared by all tickers so returns line up by date. Only information
+        available before start_date is used (no filtering on future data).
 
         Attributes set:
-            training_data_df (pd.DataFrame): Processed training data with columns:
+            training_data_df (pd.DataFrame): Rows inside the window with columns:
                 - date (str): Date in 'YYYY-MM-DD' format
                 - ticker (str): Stock ticker
                 - adj_close (float): Adjusted closing price
-                - row_number (int): Sequential number within each ticker group
         """
-        _df = self.df[self.df["date"] < self.start_date].sort_values(
-            by=["ticker", "date"], ascending=[True, False]
-        )
-        _df["row_number"] = _df.groupby("ticker").cumcount() + 1
-        _df = _df[_df["row_number"] <= self.granularity]
-        if self.start_date != self.end_date:
-            _df = _df[_df["ticker"].isin(self.monthly_return_ticker)]
-        self.training_data_df = _df
+        history = self.df[self.df["date"] < self.start_date]
+        window_dates = np.sort(history["date"].unique())[-self.granularity:]
+        self.training_data_df = history[history["date"].isin(window_dates)].sort_values(["ticker", "date"])
 
     def calculate_cov_matrix(self) -> None:
         """
@@ -287,24 +290,24 @@ class PortfolioOptimizer:
             Prints volatility statistics including average, maximum, and minimum
             annual stock volatilities.
         """
-        _df = self.training_data_df.sort_values(by="date").drop_duplicates(
-            subset=["date", "ticker"]
-        )
-        _df["sequential_index"] = _df.groupby("ticker").cumcount()
+        prices = self.training_data_df.pivot_table(
+            index="date", columns="ticker", values="adj_close", aggfunc="last"
+        ).sort_index()
 
-        self.processed_tickers = set()
+        # Drop tickers missing too many window dates; carry the last price over
+        # short gaps (a suspended stock has a zero return), then drop tickers
+        # with no price at the window start.
+        coverage = prices.notna().mean()
+        prices = prices.loc[:, coverage >= MIN_WINDOW_COVERAGE].ffill().dropna(axis=1)
 
-        _df_pivot = _df.pivot(index="sequential_index", columns="ticker", values="adj_close")
-        _df_pivot = _df_pivot.dropna(how="all", axis=1)
-        # _df_pivot = _df_pivot.ffill().bfill()
-        monthly_returns = _df_pivot.pct_change().dropna()
-        monthly_returns = monthly_returns.loc[:, (monthly_returns != 0).any(axis=0)]
+        daily_returns = prices.pct_change().iloc[1:]
+        daily_returns = daily_returns.loc[:, daily_returns.std() > 0]
 
-        time_delta = pd.to_datetime(_df['date']).diff().mean()
-        annual_factor = pd.Timedelta('365 days') / time_delta
-        self.processed_tickers = set(monthly_returns.columns)
+        self.window_prices = prices[daily_returns.columns]
+        self.processed_tickers = set(daily_returns.columns)
 
-        cov_matrix = monthly_returns.cov() * np.sqrt(annual_factor)
+        # Variance scales linearly with time
+        cov_matrix = daily_returns.cov() * TRADING_DAYS_PER_YEAR
 
         print("\nVolatility Statistics:")
         annual_vols = np.sqrt(np.diag(cov_matrix)) * 100
@@ -333,42 +336,22 @@ class PortfolioOptimizer:
             Performs validation checks for ticker consistency between
             metrics and covariance matrix calculations.
         """
-        _df = self.training_data_df.sort_values(by="date")
-
-        # Only process tickers that exist in the covariance matrix
-        if hasattr(self, "processed_tickers"):
-            _df = _df[_df["ticker"].isin(self.processed_tickers)]
-
-        monthly_metrics = (
-            _df.groupby("ticker")
-            .agg(open_price=("adj_close", "first"), close_price=("adj_close", "last"))
-            .reset_index()
-        )
-
+        # Same tickers, same order and same window as the covariance matrix
+        prices = self.window_prices
+        monthly_metrics = pd.DataFrame({
+            "ticker": prices.columns,
+            "open_price": prices.iloc[0].values,
+            "close_price": prices.iloc[-1].values,
+        })
         monthly_metrics["monthly_return (%)"] = (
                 100
                 * (monthly_metrics["close_price"] - monthly_metrics["open_price"])
                 / monthly_metrics["open_price"]
         )
 
-        monthly_metrics = pd.merge(
-            monthly_metrics, self.industry_df, on="ticker", how="left"
-        )
-
-        if len(monthly_metrics["ticker"].unique()) != len(self.processed_tickers):
-            print(f"Warning: Mismatch in ticker counts:")
-            print(f"Monthly metrics tickers: {len(monthly_metrics['ticker'].unique())}")
-            print(f"Covariance matrix tickers: {len(self.processed_tickers)}")
-            print(
-                "Missing tickers:",
-                set(self.processed_tickers) - set(monthly_metrics["ticker"]),
-            )
-            print(
-                "Extra tickers:",
-                set(monthly_metrics["ticker"]) - set(self.processed_tickers),
-            )
-
-        monthly_metrics = monthly_metrics.drop_duplicates(subset=["ticker"])
+        industries = self.industry_df.drop_duplicates(subset=["ticker"])
+        monthly_metrics = pd.merge(monthly_metrics, industries, on="ticker", how="left")
+        assert monthly_metrics["ticker"].tolist() == list(self.cov_matrix.columns)
         positive_returns = monthly_metrics[monthly_metrics["monthly_return (%)"] > 0]
         stock_names = monthly_metrics["ticker"].tolist()
         stock_returns = monthly_metrics["monthly_return (%)"].tolist()
@@ -388,13 +371,20 @@ class PortfolioOptimizer:
         Raises:
             Exception: If Gurobi initialization fails
         """
-        params = {
-            "WLSACCESSID": self.WLSACCESSID,
-            "WLSSECRET": self.WLSSECRET,
-            "LICENSEID": self.LICENSEID,
-        }
-        env = gp.Env(params=params)
-        self.model = gp.Model(env=env)
+        # One environment (one license session) per run, one model per month
+        if getattr(self, "env", None) is None:
+            if self.WLSACCESSID and self.WLSSECRET and self.LICENSEID:
+                params = {
+                    "WLSACCESSID": self.WLSACCESSID,
+                    "WLSSECRET": self.WLSSECRET,
+                    "LICENSEID": self.LICENSEID,
+                }
+                self.env = gp.Env(params=params)
+            else:
+                self.env = gp.Env()
+        if getattr(self, "model", None) is not None:
+            self.model.dispose()
+        self.model = gp.Model(env=self.env)
 
     def verify_portfolio_risk(self):
         """
@@ -545,6 +535,7 @@ class PortfolioOptimizer:
 
         min_allocation = 0.01
         max_allocation = 0.3
+        self.max_allocation = max_allocation
         for stock in self.stock_names:
             self.model.addConstr(
                 allocations[stock] <= max_allocation * select_vars[stock],
@@ -613,68 +604,88 @@ class PortfolioOptimizer:
             Prints optimization status and portfolio allocation summary.
             If no optimal solution is found, prints failure message with model status.
         """
-        if self.model.status == GRB.OPTIMAL:
-            new_rows = []
-            positions = []
+        period = datetime.strptime(self.start_date, '%Y-%m-%d').strftime("%Y-%m")
+        self.solved = self.model.SolCount > 0
+        if not self.solved:
+            # No feasible portfolio this month (e.g. volatility target too low):
+            # hold cash instead of aborting the whole run.
+            logger.warning(f"{period}: no solution (Gurobi status {self.model.status}), holding cash")
+            cash = pd.DataFrame([{
+                "period": period,
+                "datapoints": int(self.granularity),
+                "risk": float(self.volatility),
+                "ticker": "CASH",
+                "industry": "Cash",
+                "allocations": 1.0,
+                "pnl_percentage": 0.0,
+            }])
+            self.optimized_portfolio = pd.concat([self.optimized_portfolio, cash], ignore_index=True)
+            return
 
-            total_allocation = sum(self.allocations[stock].X for stock in self.stock_names)
-            print(f"\nOptimization Solution Status:")
-            print(f"Total allocation: {total_allocation * 100:.2f}%")
-            print(f"Number of selected stocks: {sum(self.select_vars[stock].X > 0.5 for stock in self.stock_names)}")
+        if self.model.status != GRB.OPTIMAL:
+            logger.warning(f"{period}: using best found solution (Gurobi status {self.model.status})")
 
-            min_reporting_threshold = 0.005  # 0.5%
-            for stock in self.allocations:
-                weight = self.allocations[stock].X
-                if weight > min_reporting_threshold:
-                    try:
-                        pnl_percentage = self.monthly_return_list[
-                            self.monthly_return_ticker.index(stock)
-                        ]
-                    except:
-                        pnl_percentage = 0
-                    try:
-                        industry = self.stock_industry[self.stock_names.index(stock)]
-                    except:
-                        industry = "Unknown"
+        new_rows = []
+        positions = []
 
-                    positions.append({
-                        "ticker": stock,
-                        "weight": weight,
-                        "industry": industry,
-                        "pnl_percentage": pnl_percentage
-                    })
+        total_allocation = sum(self.allocations[stock].X for stock in self.stock_names)
+        print(f"\nOptimization Solution Status:")
+        print(f"Total allocation: {total_allocation * 100:.2f}%")
+        print(f"Number of selected stocks: {sum(self.select_vars[stock].X > 0.5 for stock in self.stock_names)}")
 
-            if positions:
-                total_weight = sum(pos["weight"] for pos in positions)
+        # A stock with no price in the holding month (suspended, delisted, or the
+        # current month) is held flat at 0%.
+        period_pnl = dict(zip(self.monthly_return_ticker, self.monthly_return_list))
+        industry_of = dict(zip(self.stock_names, self.stock_industry))
 
-                for pos in positions:
-                    weight = round(pos["weight"] / total_weight, 2)
-                    new_rows.append({
-                        "period": datetime.strptime(self.start_date, '%Y-%m-%d').strftime("%Y-%m"),
-                        "datapoints": int(self.granularity),
-                        "risk": float(self.volatility),
-                        "ticker": pos["ticker"],
-                        "industry": pos["industry"],
-                        "allocations": weight,
-                        "pnl_percentage": float(round(pos["pnl_percentage"], 2)),
-                    })
+        # Only filters solver noise: selected stocks are already >= 1% by constraint
+        min_reporting_threshold = 1e-6
+        for stock in self.allocations:
+            weight = self.allocations[stock].X
+            if weight > min_reporting_threshold:
+                pnl_percentage = period_pnl.get(stock, 0.0)
+                industry = industry_of.get(stock)
+                if pd.isna(industry):
+                    industry = "Unknown"
 
-                df = pd.DataFrame(new_rows)
-                total = df["allocations"].sum()
-                if total != 1.0:
-                    idx_max = df["allocations"].idxmax()
-                    df.loc[idx_max, "allocations"] = round(df.loc[idx_max, "allocations"] + (1.0 - total), 2)
+                positions.append({
+                    "ticker": stock,
+                    "weight": weight,
+                    "industry": industry,
+                    "pnl_percentage": pnl_percentage
+                })
 
-                print(f"\nPortfolio Allocation Summary:")
-                print(f"Number of positions: {len(df)}")
-                print(f"Total allocation in results: {df['allocations'].sum() * 100:.2f}%")
+        if positions:
+            total_weight = sum(pos["weight"] for pos in positions)
 
-                self.optimized_portfolio = pd.concat(
-                    [self.optimized_portfolio, df],
-                    ignore_index=True
-                )
-        else:
-            print(f"Optimization failed to find a solution with status: {self.model.status}")
+            for pos in positions:
+                weight = round(pos["weight"] / total_weight, 4)
+                new_rows.append({
+                    "period": period,
+                    "datapoints": int(self.granularity),
+                    "risk": float(self.volatility),
+                    "ticker": pos["ticker"],
+                    "industry": pos["industry"],
+                    "allocations": weight,
+                    "pnl_percentage": float(round(pos["pnl_percentage"], 2)),
+                })
+
+            df = pd.DataFrame(new_rows)
+            # Put the rounding residual on the position furthest below the cap,
+            # so the reported weights never exceed max_allocation
+            residual = round(1.0 - df["allocations"].sum(), 4)
+            if residual:
+                idx = (self.max_allocation - df["allocations"]).idxmax()
+                df.loc[idx, "allocations"] = round(df.loc[idx, "allocations"] + residual, 4)
+
+            print(f"\nPortfolio Allocation Summary:")
+            print(f"Number of positions: {len(df)}")
+            print(f"Total allocation in results: {df['allocations'].sum() * 100:.2f}%")
+
+            self.optimized_portfolio = pd.concat(
+                [self.optimized_portfolio, df],
+                ignore_index=True
+            )
 
     def backtesting_simulation(self) -> None:
         """
@@ -841,8 +852,9 @@ def run_optimization_pipeline(granularity: int,
         logger.info(f"optimization result for {optimizer.start_date}")
         optimizer.optimization_result()
 
-        logger.info(f"verify portfolio risk for {optimizer.start_date}")
-        optimizer.verify_portfolio_risk()
+        if optimizer.solved:
+            logger.info(f"verify portfolio risk for {optimizer.start_date}")
+            optimizer.verify_portfolio_risk()
 
         # Update dates for next iteration
         current_date = datetime.strptime(optimizer.start_date, '%Y-%m-%d')
@@ -859,4 +871,4 @@ def run_optimization_pipeline(granularity: int,
 
 
 if __name__ == "__main__":
-    optimizer = run_optimization_pipeline()
+    optimizer = run_optimization_pipeline(granularity=DEFAULT_GRANULARITY, volatility=0.2)
