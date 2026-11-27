@@ -17,7 +17,7 @@
 - **Also done:** covariance noise, fixed with Ledoit–Wolf shrinkage on 2026-11-27.
 - **Also done:** L1, L5 and L6 (model rewrite with semi-continuous weights and the matrix API).
 - **Also done:** the sector mapping (Yahoo sectors, plus validation of limit names).
-- **Still open, algorithm:** M3 (objective choice).
+- **M3:** a 12-1 momentum option was added and tested against the trailing signal, with costs now in the backtest summary. The default is unchanged, because the evidence is inconclusive. Which signal and objective to use is the user's call.
 - **Out of scope (deployment/API, not being deployed):** C1, C2, H4, H5, H7, M5 to M14.
 
 **Bottom line:** fix the three Critical items before any public use. The volatility target the user sets does not currently control the real portfolio risk, so both the recommendations and the backtest numbers are unreliable.

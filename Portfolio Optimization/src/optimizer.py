@@ -348,6 +348,37 @@ class PortfolioOptimizer:
         self.cov_matrix = cov_matrix
         self.cov_matrix_val = cov_matrix_val
 
+    def _expected_returns(self, metrics: pd.DataFrame) -> np.ndarray:
+        """
+        Expected-return signal used in the objective, one value per row of `metrics`.
+
+        RETURN_ESTIMATOR:
+            trailing       return over the training window (the original signal)
+            momentum_12_1  return from ~12 months to ~1 month before start_date
+                           (Jegadeesh & Titman 1993); stocks with less than a
+                           year of history get the cross-sectional median
+
+        Only the ranking matters: with weights summing to 1, adding a constant
+        to every stock's signal does not change the solution.
+        """
+        if RETURN_ESTIMATOR == "trailing":
+            return metrics["monthly_return (%)"].to_numpy(dtype=float)
+        if RETURN_ESTIMATOR != "momentum_12_1":
+            raise ValueError(f"Unknown RETURN_ESTIMATOR {RETURN_ESTIMATOR!r}; use 'trailing' or 'momentum_12_1'")
+
+        history = self.df[self.df["date"] < self.start_date].sort_values("date")
+        dates = np.sort(history["date"].unique())
+        if len(dates) <= MOMENTUM_LOOKBACK_DAYS:
+            logger.warning("Less than a year of history; using the trailing signal this month")
+            return metrics["monthly_return (%)"].to_numpy(dtype=float)
+        date_from = dates[-MOMENTUM_LOOKBACK_DAYS]
+        date_to = dates[-(MOMENTUM_SKIP_DAYS + 1)]
+        price_from = history[history["date"] <= date_from].groupby("ticker")["adj_close"].last()
+        price_to = history[history["date"] <= date_to].groupby("ticker")["adj_close"].last()
+        momentum = 100 * (price_to / price_from - 1)
+        signal = metrics["ticker"].map(momentum)
+        return signal.fillna(signal.median()).to_numpy(dtype=float)
+
     def calculate_metrics(self) -> None:
         """
         Calculate portfolio metrics and returns for optimization.
@@ -382,9 +413,10 @@ class PortfolioOptimizer:
         industries = self.industry_df.drop_duplicates(subset=["ticker"])
         monthly_metrics = pd.merge(monthly_metrics, industries, on="ticker", how="left")
         assert monthly_metrics["ticker"].tolist() == list(self.cov_matrix.columns)
+        monthly_metrics["expected_return"] = self._expected_returns(monthly_metrics)
         positive_returns = monthly_metrics[monthly_metrics["monthly_return (%)"] > 0]
         stock_names = monthly_metrics["ticker"].tolist()
-        stock_returns = monthly_metrics["monthly_return (%)"].tolist()
+        stock_returns = monthly_metrics["expected_return"].tolist()
         self.stock_industry = monthly_metrics["industry"].tolist()
         self.monthly_metrics_df = monthly_metrics
         self.positive_returns = positive_returns

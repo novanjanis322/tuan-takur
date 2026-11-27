@@ -19,6 +19,7 @@
 | Covariance shrinkage (Ledoit–Wolf) | **Done.** Now the default. The volatility target is close to accurate (see below) |
 | Model rewrite (L1, L5, L6) | **Done.** Same results; free license now handles 200 stocks (was 100); model builds 80× faster |
 | Sector mapping | **Done.** Uses Yahoo's 11 real sectors (was 480 of 840 stocks in "Other"); misspelled limits now raise an error |
+| Expected-return signal (M3) | **Option added, default unchanged.** 12-1 momentum is available; the backtest now also reports results after trading costs |
 | Full 840-stock run | Not yet. Needs a full Gurobi license, or a universe of ≤ 200 stocks |
 | API / security / worker / deployment items | **Out of scope:** not deploying |
 
@@ -71,6 +72,29 @@ What this means:
 - **Speed:** the model is built with Gurobi's matrix functions instead of a Python loop, so at 840 stocks building takes 0.1 s instead of 8 s per month.
 - **New dependency:** `scipy`, needed by Gurobi's matrix functions. The local environment is now listed in `Portfolio Optimization/requirements-local.txt`.
 
+## Expected-return signal, M3 (2026-11-27)
+- **The question:** the algorithm buys whatever rose most over the last 30 days. That is noisy, and turnover was 73% a month.
+- **What doesn't help:** shrinking every stock's return toward a common average. Weights always add up to 100%, so this shifts every portfolio's score by the same amount and never changes the answer. Only a different *signal* or a different *objective* can change the result.
+- **What was added:** `RETURN_ESTIMATOR=momentum_12_1`. It uses each stock's return from 12 months ago to 1 month ago, the classic momentum signal from finance research. The default stays `trailing`, the old signal.
+- **Trading costs in the summary:** the summary now reports results **after trading costs**, assuming 0.2% per side of each trade (roughly 0.15% to buy and 0.25% to sell, including the 0.1% sales tax).
+
+LQ45, 2021-01 to 2026-10, 20% target, shrinkage on:
+
+| Signal | Window | Return/yr | After costs | Cost/month | Actual vol | Worst drop | Turnover/month |
+|---|---|---|---|---|---|---|---|
+| Trailing (default) | 30 | 11.4% | **7.6%** | 0.29% | 22.6% | −21.8% | 73% |
+| Trailing | 60 | 24.3% | 21.3% | 0.21% | 20.9% | −21.5% | 52% |
+| 12-1 momentum | 30 | 18.2% | 15.6% | 0.19% | 32.3%* | −35.6% | 47% |
+| 12-1 momentum | 60 | 17.4% | 15.4% | 0.15% | 21.9% | −19.2% | 36% |
+
+\* Mostly one month. In 2025-01, WIFI tripled (409 → 1,222, a real rally) while held at the 30% cap, so the portfolio gained +59% that month. Without the 2 best and 2 worst months, volatility is 17.8%.
+
+What this means:
+- **Trading costs are big.** With the default settings they take about **3.7% a year** off the return (11.4% → 7.6%).
+- **Momentum trades much less.** It cuts turnover by a third to a half, so costs fall.
+- **No signal is a clear winner.** With 70 months of data, the uncertainty on each yearly return is about ±9 points, so these return differences are not statistically meaningful. That's why the default is unchanged.
+- **The best results lean on survivorship.** Big winners such as WIFI and CUAN are in the universe *because* they rallied into today's LQ45.
+
 ## Sector mapping (2026-11-27)
 - **Real sectors:** the algorithm now uses each stock's Yahoo sector directly. Before, it guessed the sector from keywords in the industry name, and 480 of 840 stocks ended up in "Other".
 - **Sector names for `--sector-limits`:** Basic Materials, Communication Services, Consumer Cyclical, Consumer Defensive, Energy, Financial Services, Healthcare, Industrials, Real Estate, Technology, Utilities.
@@ -113,4 +137,5 @@ All commands run from `Portfolio Optimization/`:
 ## Open questions
 - **Gurobi license, for the full 840 stocks.** The free license now allows up to 200 stocks. For all 840, get a free academic license or a WLS license. Otherwise, pick a universe of at most 200 stocks, for example IDX80 or the 200 most liquid.
 - **Default window.** Switch the default from 30 to 60 days? It came out best on risk accuracy, but that was judged on this same backtest.
-- **Expected return (M3).** It is one trailing 30-day return, and turnover is 74% a month. Keep it, or switch to something steadier?
+- **Signal and costs.** Keep the trailing signal, or switch the default to 12-1 momentum? Should the algorithm itself account for trading costs (a turnover penalty)? That would add variables, so the free license would then handle fewer stocks (about 66 instead of 200).
+- **Survivorship.** To judge any signal fairly, the universe should be the LQ45 members *at each point in time*. That needs the historical constituent lists (published twice a year by IDX).

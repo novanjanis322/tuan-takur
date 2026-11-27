@@ -37,7 +37,7 @@ def stats(r: pd.Series) -> dict:
     }
 
 
-def summarize(path: Path) -> dict:
+def summarize(path: Path, cost: float = 0.002) -> dict:
     months, port_rows = monthly_returns(path)
     weights = port_rows.pivot_table(index="period", columns="ticker", values="allocations", fill_value=0)
     weights = weights.loc[weights.index.isin(months.index)]
@@ -60,6 +60,21 @@ def summarize(path: Path) -> dict:
             "avg_shrinkage_intensity": round(port_rows.groupby("period")["shrinkage_intensity"].first().mean(), 2),
         }
 
+    # Trading costs: `cost` per unit of weight bought or sold, counting the first
+    # month's purchase from cash. Weight drift within a month is ignored.
+    held = port_rows[port_rows["ticker"] != "CASH"].pivot_table(
+        index="period", columns="ticker", values="allocations", fill_value=0
+    ).reindex(months.index, fill_value=0)
+    traded = held.diff().abs().sum(axis=1)
+    traded.iloc[0] = held.iloc[0].sum()
+    net = stats(months["portfolio"] - cost * traded)
+    net_of_costs = {
+        "one_way_cost_pct": round(cost * 100, 2),
+        "avg_monthly_cost_pct": round(cost * traded.mean() * 100, 3),
+        "cagr_pct": net["cagr_pct"],
+        "sharpe_rf0": net["sharpe_rf0"],
+    }
+
     return {
         "file": str(path),
         "periods": f"{months.index.min()} .. {months.index.max()} ({len(months)} months)",
@@ -73,6 +88,7 @@ def summarize(path: Path) -> dict:
         "max_single_weight_pct": round(weights.max().max() * 100, 1),
         "top_avg_weights_pct": top.to_dict(),
         "risk_forecast": risk_forecast,
+        "net_of_costs": net_of_costs,
     }
 
 
@@ -81,17 +97,20 @@ def main() -> None:
     parser.add_argument("result", type=Path)
     parser.add_argument("--compare", type=Path)
     parser.add_argument("--out", type=Path)
+    parser.add_argument("--cost", type=float, default=0.002, help="one-way trading cost per unit traded (default 0.002 = 0.2%%)")
     args = parser.parse_args()
 
-    base = summarize(args.result)
+    base = summarize(args.result, args.cost)
     if args.compare:
-        new = summarize(args.compare)
+        new = summarize(args.compare, args.cost)
         rows = []
         for side in ["portfolio", "lq45"]:
             for k in base[side]:
                 rows.append({"metric": f"{side}.{k}", "before": base[side][k], "after": new[side][k]})
         for k in ["months_beating_lq45_pct", "cash_months", "avg_holdings", "avg_monthly_turnover_pct", "max_single_weight_pct"]:
             rows.append({"metric": k, "before": base[k], "after": new[k]})
+        for k in base["net_of_costs"]:
+            rows.append({"metric": f"net_of_costs.{k}", "before": base["net_of_costs"][k], "after": new["net_of_costs"][k]})
         for k in sorted(set(base["risk_forecast"]) | set(new["risk_forecast"])):
             rows.append({"metric": f"risk_forecast.{k}",
                          "before": base["risk_forecast"].get(k), "after": new["risk_forecast"].get(k)})

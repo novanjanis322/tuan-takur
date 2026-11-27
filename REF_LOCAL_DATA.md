@@ -98,6 +98,18 @@ LQ45 result, 2021-01 to 2026-10, g=30, vol=0.2 (`data/processed/comparison_lq45.
 - Free (size-limited) license, synthetic test: semi-continuous solves N=150 and N=200 and is refused at N=250; binary is refused at N=150. Gurobi presolve turns semi-continuous into binaries internally, but the license counts the model as built.
 - Build time at N=840: 0.10 s (matrix API) vs 8.12 s (old Python loop).
 
+## Expected-return signal, M3 (2026-11-27)
+- `settings.RETURN_ESTIMATOR` (env var, default `trailing`). `momentum_12_1` uses the price at the 252nd-last trading date before start and at the 22nd-last (skipping 21 days), with the last price on or before each date. Stocks lacking the older price get the cross-sectional median. With under a year of history it falls back to `trailing` with a warning. This lives in `PortfolioOptimizer._expected_returns`; `calculate_metrics` stores `expected_return` and the objective uses it.
+- Analytical note: shrinking μ toward a constant vector (Bayes–Stein/Jorion toward the grand mean) is a no-op here. The objective μ'w is linear and sum(w)=1, so μ+c·1 gives the same argmax. Only a re-ranking signal or an objective with a risk/turnover term changes the solution.
+- `summarize_run.py --cost` (default 0.002 one-way) reports `net_of_costs`: cost_t = cost × Σ|Δw|, with the first month counted as a buy from cash and CASH treated as free. Weight drift is ignored.
+- Grid (LQ45, LW, vol 0.2), CAGR / net CAGR / vol / maxDD / turnover:
+  - trailing g30: 11.35 / 7.61 / 22.63 / −21.75 / 72.8
+  - trailing g60: 24.34 / 21.30 / 20.93 / −21.52 / 52.2
+  - mom g30: 18.18 / 15.55 / 32.31 / −35.59 / 47.3, bias 1.63, driven by 2025-01 (+59%, WIFI 409 → 1222 held at 30%). This was verified in the raw data as a real limit-up rally, not a data error.
+  - mom g60: 17.42 / 15.41 / 21.87 / −19.16 / 35.6
+  - Full table in `data/processed/signal_comparison_lq45.csv`.
+- Return differences are within noise (annual mean SE ≈ vol/√5.8y ≈ ±9 pts). Default kept at `trailing`. A turnover penalty in the objective needs buy/sell auxiliary variables (3N vars, so the free license caps at about 66 stocks).
+
 ## Sector mapping (2026-11-27)
 - `data/local/info.csv` is now `ticker, sector, industry` (written by `ingest_idx_data.py --only export`).
 - `PortfolioOptimizer._prepare_sectors()` runs after `load_data`. It builds `self.ticker_sector` from the `sector` column when present, and falls back to `create_sector_mapping()` (keywords on industry) otherwise, as with the BigQuery data. It raises `ValueError` on a `sector_limits` key that is not a known sector. `define_optimization_model` uses `ticker_sector`. Result rows gain `sector` (`Cash` for CASH rows).
