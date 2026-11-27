@@ -18,6 +18,7 @@
 | Algorithm fixes (C3, H1, M2, M4, H3, H6/M1, L7, L2) | **Done.** Re-run on the same LQ45 settings (`data/processed/fixed_lq45/`) |
 | Covariance shrinkage (Ledoit–Wolf) | **Done.** Now the default. The volatility target is close to accurate (see below) |
 | Model rewrite (L1, L5, L6) | **Done.** Same results; free license now handles 200 stocks (was 100); model builds 80× faster |
+| Sector mapping | **Done.** Uses Yahoo's 11 real sectors (was 480 of 840 stocks in "Other"); misspelled limits now raise an error |
 | Full 840-stock run | Not yet. Needs a full Gurobi license, or a universe of ≤ 200 stocks |
 | API / security / worker / deployment items | **Out of scope:** not deploying |
 
@@ -70,6 +71,17 @@ What this means:
 - **Speed:** the model is built with Gurobi's matrix functions instead of a Python loop, so at 840 stocks building takes 0.1 s instead of 8 s per month.
 - **New dependency:** `scipy`, needed by Gurobi's matrix functions. The local environment is now listed in `Portfolio Optimization/requirements-local.txt`.
 
+## Sector mapping (2026-11-27)
+- **Real sectors:** the algorithm now uses each stock's Yahoo sector directly. Before, it guessed the sector from keywords in the industry name, and 480 of 840 stocks ended up in "Other".
+- **Sector names for `--sector-limits`:** Basic Materials, Communication Services, Consumer Cyclical, Consumer Defensive, Energy, Financial Services, Healthcare, Industrials, Real Estate, Technology, Utilities.
+  ```
+  main.py --start-date 2021-01-01 --sector-limits '{"Energy": 0.2, "Basic Materials": 0.2}'
+  ```
+- **Misspellings caught:** a misspelled sector name now stops the run with the list of valid names. Before, it was silently ignored.
+- **Exact caps:** reported weights never go over a stock or sector cap, not even by 0.01%.
+- **Sector in the results:** each position in the results now has a `sector` column.
+- **Why limits matter:** without them, the algorithm put up to **79%** in Energy in one month. With Energy and Basic Materials each capped at 20% (LQ45, 30-day window): return 9.8%/yr against 11.4%, volatility 22.2% against 22.6%, worst drop −31.8% against −21.8%.
+
 ## What the algorithm fixes changed
 - **Risk scale (C3):** daily variance × 252 days, instead of an arbitrary square-root factor.
 - **Dates line up (H1):** returns are matched by date, and days with an unchanged price are kept. This also changed the BigQuery query.
@@ -101,5 +113,4 @@ All commands run from `Portfolio Optimization/`:
 ## Open questions
 - **Gurobi license, for the full 840 stocks.** The free license now allows up to 200 stocks. For all 840, get a free academic license or a WLS license. Otherwise, pick a universe of at most 200 stocks, for example IDX80 or the 200 most liquid.
 - **Default window.** Switch the default from 30 to 60 days? It came out best on risk accuracy, but that was judged on this same backtest.
-- **Sector mapping.** 480 of 840 stocks fall into "Other". The sector names can be changed freely, since no API depends on them.
 - **Expected return (M3).** It is one trailing 30-day return, and turnover is 74% a month. Keep it, or switch to something steadier?

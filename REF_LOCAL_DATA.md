@@ -97,4 +97,10 @@ LQ45 result, 2021-01 to 2026-10, g=30, vol=0.2 (`data/processed/comparison_lq45.
 - Equivalence check against the binary model (LW, g30, LQ45): 70/71 periods identical, max per-period weight shift 0.23%, total return 87.28% vs 87.26%.
 - Free (size-limited) license, synthetic test: semi-continuous solves N=150 and N=200 and is refused at N=250; binary is refused at N=150. Gurobi presolve turns semi-continuous into binaries internally, but the license counts the model as built.
 - Build time at N=840: 0.10 s (matrix API) vs 8.12 s (old Python loop).
+
+## Sector mapping (2026-11-27)
+- `data/local/info.csv` is now `ticker, sector, industry` (written by `ingest_idx_data.py --only export`).
+- `PortfolioOptimizer._prepare_sectors()` runs after `load_data`. It builds `self.ticker_sector` from the `sector` column when present, and falls back to `create_sector_mapping()` (keywords on industry) otherwise, as with the BigQuery data. It raises `ValueError` on a `sector_limits` key that is not a known sector. `define_optimization_model` uses `ticker_sector`. Result rows gain `sector` (`Cash` for CASH rows).
+- Weight reporting: each weight is rounded *down* to 1e-4; the residual (≥ 0) goes to the position with the largest `min(stock cap − w, sector cap − sector total)`. Verified on a run with Energy/Materials ≤ 0.2: max sector 0.2000, max stock 0.3000, sums exactly 1.
+- LQ45, LW, g30: no limits gives CAGR 11.35%, vol 22.63%, maxDD −21.75%, with Energy up to 79.5%. Energy ≤ 0.2 and Basic Materials ≤ 0.2 gives 9.77% / 22.17% / −31.8%.
 - Free Gurobi pip license: 200 variables when the model has quadratic terms, and the model uses 2 variables per stock, so at most ~100 stocks per month. The full universe will fail with "Model too large". The user wants to discuss this later; no universe filter has been added.

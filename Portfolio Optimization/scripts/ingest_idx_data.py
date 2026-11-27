@@ -7,7 +7,7 @@ Steps (run all by default, or pick with --only):
   info       sector / industry per ticker                  -> data/raw/industry_info.csv
   benchmark  ^JKLQ45 and ^JKSE daily                       -> data/raw/benchmark_lq45.csv, data/raw/benchmarks_raw.parquet
   report     per-ticker coverage                           -> data/raw/ingest_report.csv
-  export     files in the shape the pipeline reads         -> data/local/adj_close_price.csv, data/local/info.csv
+  export     files in the shape the pipeline reads         -> data/local/adj_close_price.csv, data/local/info.csv (ticker, sector, industry)
 
 Prices and info are resumable: finished batches / tickers are skipped on rerun.
 
@@ -252,7 +252,7 @@ def export_local() -> None:
     prices.sort_values(["ticker", "date"]).to_csv(LOCAL_PRICES_CSV, index=False)
     logger.info(f"Saved {len(prices):,} rows -> {LOCAL_PRICES_CSV}")
 
-    info = pd.read_csv(INFO_CSV)[["ticker", "industry"]]
+    info = pd.read_csv(INFO_CSV)[["ticker", "sector", "industry"]]
     info = info[info["ticker"].isin(prices["ticker"].unique())].drop_duplicates()
     info.to_csv(LOCAL_INFO_CSV, index=False)
     logger.info(f"Saved {len(info)} rows -> {LOCAL_INFO_CSV}")

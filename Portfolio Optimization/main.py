@@ -56,7 +56,10 @@ def get_user_inputs() -> Tuple[str, int, float, Dict[str, float]]:
         '--sector-limits',
         type=json.loads,
         default={},
-        help='JSON map of sector to max weight, e.g. \'{"Financial": 0.4}\''
+        help='JSON map of sector to max weight, e.g. \'{"Financial Services": 0.4}\'. '
+             'Local data uses Yahoo sectors: Basic Materials, Communication Services, Consumer Cyclical, '
+             'Consumer Defensive, Energy, Financial Services, Healthcare, Industrials, Real Estate, '
+             'Technology, Utilities'
     )
 
     args = parser.parse_args()

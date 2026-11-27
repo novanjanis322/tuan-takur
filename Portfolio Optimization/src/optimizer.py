@@ -107,6 +107,31 @@ class PortfolioOptimizer:
         except Exception as e:
             raise Exception(f"Error in loading data: {str(e)}")
 
+        self._prepare_sectors()
+
+    def _prepare_sectors(self) -> None:
+        """
+        Map each ticker to a sector and check the sector limit names.
+
+        Uses the data's own `sector` column when present (Yahoo's 11 sectors in
+        local data). Otherwise falls back to keyword matching on `industry`.
+
+        Raises:
+            ValueError: If a sector limit names a sector that does not exist
+                (it would otherwise be silently ignored)
+        """
+        info = self.industry_df.drop_duplicates(subset=["ticker"])
+        if "sector" in info.columns:
+            sectors = info["sector"]
+        else:
+            sectors = info["industry"].map(self.create_sector_mapping())
+        self.ticker_sector = dict(zip(info["ticker"], sectors.fillna("Other")))
+
+        known = set(self.ticker_sector.values())
+        unknown = sorted(set(self.sector_limits) - known)
+        if unknown:
+            raise ValueError(f"Unknown sector(s) in sector_limits: {unknown}. Valid sectors: {sorted(known)}")
+
     def _validate_loaded_data(self) -> None:
         """
         Validate the structure and content of loaded data.
@@ -436,6 +461,7 @@ class PortfolioOptimizer:
     def create_sector_mapping(self) -> dict:
         """
         Create a mapping of industries to broader sectors using keyword matching.
+        Only used when the industry data has no `sector` column (see _prepare_sectors).
 
         Maps each industry to one of the following sectors:
         - Financial
@@ -520,8 +546,7 @@ class PortfolioOptimizer:
         self.model.addConstr(np.sqrt(np.diag(sigma)) * w <= target, name="IndividualRiskLimit")
         self.model.addConstr(w.sum() == 1, name="TotalInvestment")
 
-        sector_mapping = self.create_sector_mapping()
-        stock_sectors = np.array([sector_mapping.get(industry, 'Other') for industry in self.stock_industry])
+        stock_sectors = np.array([self.ticker_sector.get(t, "Other") for t in self.stock_names])
         for sector, limit in self.sector_limits.items():
             in_sector = (stock_sectors == sector).astype(float)
             if in_sector.any():
@@ -574,6 +599,7 @@ class PortfolioOptimizer:
                 "datapoints": int(self.granularity),
                 "risk": float(self.volatility),
                 "ticker": "CASH",
+                "sector": "Cash",
                 "industry": "Cash",
                 "allocations": 1.0,
                 "pnl_percentage": 0.0,
@@ -622,12 +648,14 @@ class PortfolioOptimizer:
             total_weight = sum(pos["weight"] for pos in positions)
 
             for pos in positions:
-                weight = round(pos["weight"] / total_weight, 4)
+                # Round down to 0.01% so no stock or sector total rises above the solver's value
+                weight = np.floor(pos["weight"] / total_weight * 1e4 + 1e-6) / 1e4
                 new_rows.append({
                     "period": period,
                     "datapoints": int(self.granularity),
                     "risk": float(self.volatility),
                     "ticker": pos["ticker"],
+                    "sector": self.ticker_sector.get(pos["ticker"], "Other"),
                     "industry": pos["industry"],
                     "allocations": weight,
                     "pnl_percentage": float(round(pos["pnl_percentage"], 2)),
@@ -636,11 +664,14 @@ class PortfolioOptimizer:
                 })
 
             df = pd.DataFrame(new_rows)
-            # Put the rounding residual on the position furthest below the cap,
-            # so the reported weights never exceed max_allocation
+            # Put the rounding residual on the position with the most room under
+            # both its stock cap and its sector cap, so no reported limit is exceeded
             residual = round(1.0 - df["allocations"].sum(), 4)
             if residual:
-                idx = (self.max_allocation - df["allocations"]).idxmax()
+                sector_total = df.groupby("sector")["allocations"].transform("sum")
+                sector_cap = df["sector"].map(self.sector_limits).fillna(1.0)
+                headroom = np.minimum(self.max_allocation - df["allocations"], sector_cap - sector_total)
+                idx = headroom.idxmax()
                 df.loc[idx, "allocations"] = round(df.loc[idx, "allocations"] + residual, 4)
 
             print(f"\nPortfolio Allocation Summary:")

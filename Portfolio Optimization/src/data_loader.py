@@ -183,7 +183,7 @@ class DataLoader:
         logger.info("Loading industry data")
         if self.source == "local":
             return self._apply_universe(
-                pd.read_csv(LOCAL_DATA_DIR / "info.csv", dtype={"ticker": str, "industry": str})
+                pd.read_csv(LOCAL_DATA_DIR / "info.csv", dtype={"ticker": str, "sector": str, "industry": str})
             )
 
         cache_path = self.cache_dir / "industry_data.csv"
