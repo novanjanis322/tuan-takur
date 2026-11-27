@@ -16,6 +16,7 @@
 | The algorithm reads local data (no BigQuery needed) | Done and tested |
 | LQ45 baseline run (old algorithm) | Done. Saved in `data/processed/baseline_lq45/` |
 | Algorithm fixes (C3, H1, M2, M4, H3, H6/M1, L7, L2) | **Done.** Re-run on the same LQ45 settings (`data/processed/fixed_lq45/`) |
+| Covariance shrinkage (Ledoit–Wolf) | **Done.** Now the default. The volatility target is close to accurate (see below) |
 | Full 840-stock run | Not yet. The Gurobi license needs to be decided first |
 | API / security / worker / deployment items | **Out of scope:** not deploying |
 
@@ -39,6 +40,28 @@ What this means:
 - **Both runs share one bias.** They use today's 45 LQ45 members for the whole period, including stocks that only joined after big rallies (for example CUAN). That makes both runs look better than a real 2021 investor could have done.
 - **Some months now hold cash.** In 2 months (2025-05 and the current month, 2026-11), no LQ45 portfolio could meet 20% volatility, so the run holds cash instead of crashing. **The current-month recommendation at 20% is therefore "cash".** Try `--volatility 0.25` or `0.3`.
 
+## Covariance shrinkage (2026-11-27)
+**Problem:** a 30-day window gives only 29 daily returns for 45 stocks. The risk estimate is then very noisy, and the algorithm leans into combinations that look safe but are not. The result was 25% actual volatility against a 20% target.
+
+**Fix:** the algorithm now uses Ledoit–Wolf shrinkage toward a constant-correlation target. Each stock keeps its own volatility, the noisy stock-to-stock correlations are pulled toward the average, and the data decides how hard to pull. A simulation test confirmed the method: it roughly halved the estimation error.
+
+LQ45, 2021-01 to 2026-10, 20% target:
+
+| Risk estimate | Window | Actual volatility | Bias (1.0 = right) | CAGR | Worst drop | Sharpe | Turnover/month |
+|---|---|---|---|---|---|---|---|
+| Old (sample) | 30 days | 25.4% | 1.28 | 16.4% | −25.8% | 0.72 | 74% |
+| Shrinkage | 30 days | 22.6% | 1.14 | 11.4% | −21.8% | 0.59 | 73% |
+| Old (sample) | 60 days | 25.7% | 1.29 | 24.0% | −29.5% | 0.96 | 54% |
+| **Shrinkage** | **60 days** | **20.9%** | **1.05** | 24.4% | −21.5% | 1.15 | 52% |
+| Old (sample) | 90 days | 25.7% | 1.29 | 17.8% | −37.4% | 0.76 | 44% |
+| Shrinkage | 90 days | 23.0% | 1.16 | 18.0% | −33.6% | 0.83 | 42% |
+
+What this means:
+- **Shrinkage helps at every window length.** Actual risk always moves closer to the target. That is the reliable result.
+- **60 days with shrinkage is the closest to the target** (20.9% against 20%). Treat the window choice with care: with 70 months of data, differences of about 2 points in volatility are within noise. The return numbers are noisier still, so don't pick a window because of its CAGR.
+- **A longer window lowers turnover** (74% → about 50%), because the risk estimate changes less from month to month.
+- The default window is still 30 days. Use `--granularity 60` to try the best setting.
+
 ## What the algorithm fixes changed
 - **Risk scale (C3):** daily variance × 252 days, instead of an arbitrary square-root factor.
 - **Dates line up (H1):** returns are matched by date, and days with an unchanged price are kept. This also changed the BigQuery query.
@@ -54,7 +77,8 @@ What this means:
 Folder: `Portfolio Optimization/data/`
 - `raw/prices_ohlcv.parquet`: the full raw price history. `raw/ingest_report.csv`: data quality per stock.
 - `processed/baseline_lq45/`: the old-algorithm run (results, log, summary, and a copy of the old code).
-- `processed/fixed_lq45/`: the fixed-algorithm run. `processed/comparison_lq45.json`: the comparison above.
+- `processed/fixed_lq45/`: the fixed-algorithm run.
+- `processed/cov_<estimator>_g<window>/` and `processed/covariance_comparison_lq45.csv`: the shrinkage runs. `processed/comparison_lq45.json`: the comparison above.
 
 ## How to run
 All commands run from `Portfolio Optimization/`:
@@ -71,6 +95,6 @@ All commands run from `Portfolio Optimization/`:
   - switch to "semi-continuous" variables (about 200 stocks on the free license);
   - a free academic license;
   - a WLS license.
-- **Volatility estimate.** Add covariance shrinkage, or use a longer window, so actual risk lands closer to the target?
+- **Default window.** Switch the default from 30 to 60 days? It came out best on risk accuracy, but that was judged on this same backtest.
 - **Sector mapping.** 480 of 840 stocks fall into "Other". The sector names can be changed freely, since no API depends on them.
 - **Expected return (M3).** It is one trailing 30-day return, and turnover is 74% a month. Keep it, or switch to something steadier?

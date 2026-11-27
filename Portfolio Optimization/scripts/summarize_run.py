@@ -47,6 +47,19 @@ def summarize(path: Path) -> dict:
     turnover = weights.diff().abs().sum(axis=1).iloc[1:] / 2
     holdings = (weights > 0).sum(axis=1)
     top = (weights.mean().sort_values(ascending=False).head(8) * 100).round(1)
+
+    # Forecast quality: std of (monthly return / believed monthly vol) is ~1 when risk is forecast right
+    risk_forecast = {}
+    if "ex_ante_volatility" in port_rows.columns:
+        believed = port_rows.groupby("period")["ex_ante_volatility"].first()
+        believed = believed[(believed > 0) & believed.index.isin(months.index)]
+        z = months.loc[believed.index, "portfolio"] / (believed / np.sqrt(12))
+        risk_forecast = {
+            "avg_believed_vol_pct": round(believed.mean() * 100, 2),
+            "bias_statistic": round(z.std(ddof=1), 2),
+            "avg_shrinkage_intensity": round(port_rows.groupby("period")["shrinkage_intensity"].first().mean(), 2),
+        }
+
     return {
         "file": str(path),
         "periods": f"{months.index.min()} .. {months.index.max()} ({len(months)} months)",
@@ -59,6 +72,7 @@ def summarize(path: Path) -> dict:
         "avg_monthly_turnover_pct": round(turnover.mean() * 100, 1),
         "max_single_weight_pct": round(weights.max().max() * 100, 1),
         "top_avg_weights_pct": top.to_dict(),
+        "risk_forecast": risk_forecast,
     }
 
 
@@ -78,6 +92,9 @@ def main() -> None:
                 rows.append({"metric": f"{side}.{k}", "before": base[side][k], "after": new[side][k]})
         for k in ["months_beating_lq45_pct", "cash_months", "avg_holdings", "avg_monthly_turnover_pct", "max_single_weight_pct"]:
             rows.append({"metric": k, "before": base[k], "after": new[k]})
+        for k in sorted(set(base["risk_forecast"]) | set(new["risk_forecast"])):
+            rows.append({"metric": f"risk_forecast.{k}",
+                         "before": base["risk_forecast"].get(k), "after": new["risk_forecast"].get(k)})
         print(pd.DataFrame(rows).to_string(index=False))
         print("\nBefore top weights:", base["top_avg_weights_pct"])
         print("After top weights: ", new["top_avg_weights_pct"])

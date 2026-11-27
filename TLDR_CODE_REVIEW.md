@@ -14,7 +14,8 @@
 **Fix status (2026-11-27):**
 - **Scope:** this is now a personal project with **no deployment**. Only the algorithm (`src/optimizer.py` and its data and backtest) is being worked on.
 - **Fixed in the algorithm:** C3, H1, H2, H3, H6, M1 (the date part), M2, M4, L2, L7, L9, and L10 (the `LICENSE_ID` part). Before/after results are in `TLDR_OVERVIEW.md`.
-- **Still open, algorithm:** M3 (objective choice), L1, L5, L6, the sector mapping, and covariance noise.
+- **Also done:** covariance noise, fixed with Ledoit–Wolf shrinkage on 2026-11-27.
+- **Still open, algorithm:** M3 (objective choice), L1, L5, L6, and the sector mapping.
 - **Out of scope (deployment/API, not being deployed):** C1, C2, H4, H5, H7, M5 to M14.
 
 **Bottom line:** fix the three Critical items before any public use. The volatility target the user sets does not currently control the real portfolio risk, so both the recommendations and the backtest numbers are unreliable.

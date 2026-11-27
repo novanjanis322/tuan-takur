@@ -31,3 +31,5 @@ DEFAULT_GRANULARITY = 30  # trading days in the training window
 # Covariance estimation
 TRADING_DAYS_PER_YEAR = 252  # annualises daily variance
 MIN_WINDOW_COVERAGE = 0.9    # a ticker needs prices on >= 90% of the window's trading dates
+# "ledoit_wolf_cc" (shrink toward constant correlation) or "sample"
+COV_ESTIMATOR = os.getenv("COV_ESTIMATOR", "ledoit_wolf_cc")

@@ -6,6 +6,7 @@ from datetime import datetime, date
 from dateutil.relativedelta import relativedelta
 from gurobipy import GRB, quicksum
 import logging
+from .covariance import estimate_covariance
 from .data_loader import DataLoader
 from .settings import *
 
@@ -307,7 +308,11 @@ class PortfolioOptimizer:
         self.processed_tickers = set(daily_returns.columns)
 
         # Variance scales linearly with time
-        cov_matrix = daily_returns.cov() * TRADING_DAYS_PER_YEAR
+        daily_cov, self.shrinkage_intensity = estimate_covariance(daily_returns, COV_ESTIMATOR)
+        cov_matrix = daily_cov * TRADING_DAYS_PER_YEAR
+        print(f"\nCovariance estimator: {COV_ESTIMATOR} "
+              f"(shrinkage intensity {self.shrinkage_intensity:.2f}, "
+              f"{daily_returns.shape[0]} returns x {daily_returns.shape[1]} stocks)")
 
         print("\nVolatility Statistics:")
         annual_vols = np.sqrt(np.diag(cov_matrix)) * 100
@@ -618,6 +623,8 @@ class PortfolioOptimizer:
                 "industry": "Cash",
                 "allocations": 1.0,
                 "pnl_percentage": 0.0,
+                "ex_ante_volatility": 0.0,
+                "shrinkage_intensity": float(self.shrinkage_intensity),
             }])
             self.optimized_portfolio = pd.concat([self.optimized_portfolio, cash], ignore_index=True)
             return
@@ -627,6 +634,10 @@ class PortfolioOptimizer:
 
         new_rows = []
         positions = []
+
+        # Annual volatility the model believes this portfolio has
+        solved_weights = np.array([self.allocations[stock].X for stock in self.stock_names])
+        ex_ante_volatility = float(np.sqrt(solved_weights @ self.cov_matrix_val @ solved_weights))
 
         total_allocation = sum(self.allocations[stock].X for stock in self.stock_names)
         print(f"\nOptimization Solution Status:")
@@ -668,6 +679,8 @@ class PortfolioOptimizer:
                     "industry": pos["industry"],
                     "allocations": weight,
                     "pnl_percentage": float(round(pos["pnl_percentage"], 2)),
+                    "ex_ante_volatility": round(ex_ante_volatility, 4),
+                    "shrinkage_intensity": round(float(self.shrinkage_intensity), 3),
                 })
 
             df = pd.DataFrame(new_rows)
