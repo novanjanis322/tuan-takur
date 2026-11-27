@@ -1,0 +1,16 @@
+# Local run of the algorithm (Python 3.11)
+#   uv venv --python 3.11 .venv-local
+#   uv pip install --python .venv-local/Scripts/python.exe -r requirements-local.txt
+pandas==2.2.2
+numpy==2.4.6
+scipy==1.17.1
+gurobipy==14.0.0
+yfinance==1.8.0
+curl-cffi==0.17.0
+pyarrow==26.0.1
+duckdb==2.0.1
+python-dotenv==1.2.4
+python-dateutil==2.9.0.post0
+# only needed for DATA_SOURCE=bigquery
+google-cloud-bigquery==3.26.0
+db-dtypes==1.9.0

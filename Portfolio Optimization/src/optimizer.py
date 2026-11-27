@@ -4,7 +4,7 @@ import pandas as pd
 from typing import Optional, Union, Dict
 from datetime import datetime, date
 from dateutil.relativedelta import relativedelta
-from gurobipy import GRB, quicksum
+from gurobipy import GRB
 import logging
 from .covariance import estimate_covariance
 from .data_loader import DataLoader
@@ -408,7 +408,7 @@ class PortfolioOptimizer:
             Prints detailed risk analysis including weights, individual
             volatilities, and risk contributions for each position.
         """
-        portfolio_weights = np.array([self.allocations[stock].X for stock in self.stock_names])
+        portfolio_weights = self.weights.X
 
         portfolio_variance = portfolio_weights.T @ self.cov_matrix_val @ portfolio_weights
         portfolio_volatility = np.sqrt(portfolio_variance)
@@ -489,91 +489,45 @@ class PortfolioOptimizer:
 
     def define_optimization_model(self) -> None:
         """
-        Define the portfolio optimization model with constraints.
+        Define the portfolio optimization model.
 
-        Sets up a Gurobi optimization model with:
-        1. Maximum return objective function
-        2. Risk limit constraint (20% annual volatility)
-        3. Full investment constraint (weights sum to 1)
-        4. Minimum stocks constraint (at least 2 stocks)
-        5. Minimum allocation to regional banks (10%)
+        maximize    mu' w
+        subject to  w' Sigma w <= volatility^2          (annual portfolio risk)
+                    sigma_i w_i <= volatility           (no single stock alone exceeds the target)
+                    sum(w) == 1                         (fully invested)
+                    w_i == 0 or 1% <= w_i <= 30%        (semi-continuous weights)
+                    sum of w in a sector <= its limit   (optional sector limits)
+
+        The semi-continuous weights replace a binary "selected" variable per stock
+        with the same feasible set, so the model needs one variable per stock.
 
         Attributes Set:
-            allocations: Portfolio weight variables
-            select_vars: Binary variables for stock selection
-
-        Raises:
-            Exception: If model definition fails
+            weights: Gurobi MVar of portfolio weights, ordered like stock_names
+            max_allocation: Upper bound per stock
         """
-        allocations = self.model.addVars(
-            self.stock_names, lb=0.0, ub=1.0, name="allocation"
-        )
-        select_vars = self.model.addVars(
-            self.stock_names, vtype=GRB.BINARY, name="select"
-        )
-
-        self.model.setObjective(
-            quicksum(
-                allocations[stock] * self.stock_returns[self.stock_names.index(stock)]
-                for stock in self.stock_names
-            ),
-            GRB.MAXIMIZE,
-        )
-
-        target_annual_volatility = self.volatility
-        risk_expression = quicksum(
-            self.cov_matrix_val[i][j] * allocations[stock_i] * allocations[stock_j]
-            for i, stock_i in enumerate(self.stock_names)
-            for j, stock_j in enumerate(self.stock_names)
-        )
-        self.model.addConstr(
-            risk_expression <= target_annual_volatility ** 2,
-            "RiskLimit"
-        )
-        # Individual stock contribution constraints
-        for i, stock in enumerate(self.stock_names):
-            stock_variance = self.cov_matrix_val[i][i]
-            self.model.addConstr(
-                allocations[stock] * np.sqrt(stock_variance) <= target_annual_volatility,
-                f"IndividualRiskLimit_{stock}"
-            )
-
         min_allocation = 0.01
         max_allocation = 0.3
         self.max_allocation = max_allocation
-        for stock in self.stock_names:
-            self.model.addConstr(
-                allocations[stock] <= max_allocation * select_vars[stock],
-                "MaxAllocation"
-            )
-            self.model.addConstr(
-                allocations[stock] >= min_allocation * select_vars[stock],
-                "MinAllocation"
-            )
 
-        self.model.addConstr(
-            quicksum(allocations[stock] for stock in self.stock_names) == 1,
-            "TotalInvestment",
-        )
+        n = len(self.stock_names)
+        mu = np.asarray(self.stock_returns, dtype=float)
+        sigma = self.cov_matrix_val
+        target = self.volatility
 
-        self.model.addConstr(
-            quicksum(select_vars[stock] for stock in self.stock_names) <= int(1 / min_allocation),
-            "MaxStocks"
-        )
+        w = self.model.addMVar(n, vtype=GRB.SEMICONT, lb=min_allocation, ub=max_allocation, name="weight")
+        self.model.setObjective(mu @ w, GRB.MAXIMIZE)
+        self.model.addConstr(w @ sigma @ w <= target ** 2, name="RiskLimit")
+        self.model.addConstr(np.sqrt(np.diag(sigma)) * w <= target, name="IndividualRiskLimit")
+        self.model.addConstr(w.sum() == 1, name="TotalInvestment")
 
         sector_mapping = self.create_sector_mapping()
-        stock_sectors = [sector_mapping.get(industry, 'Other') for industry in self.stock_industry]
-
+        stock_sectors = np.array([sector_mapping.get(industry, 'Other') for industry in self.stock_industry])
         for sector, limit in self.sector_limits.items():
-            sector_stocks = [stock for i, stock in enumerate(self.stock_names) if stock_sectors[i] == sector]
-            if sector_stocks:
-                self.model.addConstr(
-                    quicksum(allocations[stock] for stock in sector_stocks) <= limit,
-                    name=f"Sector_Limit_{sector}"
-                )
+            in_sector = (stock_sectors == sector).astype(float)
+            if in_sector.any():
+                self.model.addConstr(in_sector @ w <= limit, name=f"SectorLimit_{sector}")
 
-        self.allocations = allocations
-        self.select_vars = select_vars
+        self.weights = w
 
     def run_optimization(self) -> None:
         """
@@ -636,13 +590,12 @@ class PortfolioOptimizer:
         positions = []
 
         # Annual volatility the model believes this portfolio has
-        solved_weights = np.array([self.allocations[stock].X for stock in self.stock_names])
+        solved_weights = self.weights.X
         ex_ante_volatility = float(np.sqrt(solved_weights @ self.cov_matrix_val @ solved_weights))
 
-        total_allocation = sum(self.allocations[stock].X for stock in self.stock_names)
         print(f"\nOptimization Solution Status:")
-        print(f"Total allocation: {total_allocation * 100:.2f}%")
-        print(f"Number of selected stocks: {sum(self.select_vars[stock].X > 0.5 for stock in self.stock_names)}")
+        print(f"Total allocation: {solved_weights.sum() * 100:.2f}%")
+        print(f"Number of selected stocks: {int((solved_weights > 1e-6).sum())}")
 
         # A stock with no price in the holding month (suspended, delisted, or the
         # current month) is held flat at 0%.
@@ -651,8 +604,7 @@ class PortfolioOptimizer:
 
         # Only filters solver noise: selected stocks are already >= 1% by constraint
         min_reporting_threshold = 1e-6
-        for stock in self.allocations:
-            weight = self.allocations[stock].X
+        for stock, weight in zip(self.stock_names, solved_weights):
             if weight > min_reporting_threshold:
                 pnl_percentage = period_pnl.get(stock, 0.0)
                 industry = industry_of.get(stock)

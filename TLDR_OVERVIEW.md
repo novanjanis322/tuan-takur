@@ -17,7 +17,8 @@
 | LQ45 baseline run (old algorithm) | Done. Saved in `data/processed/baseline_lq45/` |
 | Algorithm fixes (C3, H1, M2, M4, H3, H6/M1, L7, L2) | **Done.** Re-run on the same LQ45 settings (`data/processed/fixed_lq45/`) |
 | Covariance shrinkage (Ledoit–Wolf) | **Done.** Now the default. The volatility target is close to accurate (see below) |
-| Full 840-stock run | Not yet. The Gurobi license needs to be decided first |
+| Model rewrite (L1, L5, L6) | **Done.** Same results; free license now handles 200 stocks (was 100); model builds 80× faster |
+| Full 840-stock run | Not yet. Needs a full Gurobi license, or a universe of ≤ 200 stocks |
 | API / security / worker / deployment items | **Out of scope:** not deploying |
 
 ## Before vs after the fixes
@@ -62,6 +63,13 @@ What this means:
 - **A longer window lowers turnover** (74% → about 50%), because the risk estimate changes less from month to month.
 - The default window is still 30 days. Use `--granularity 60` to try the best setting.
 
+## Model rewrite (2026-11-27)
+- **Change:** each stock's weight is now one "semi-continuous" variable: either 0, or between 1% and 30%. It replaces a weight plus a yes/no "selected" variable and a stock-count limit that never did anything. Mathematically it is the same model.
+- **Same results:** 70 of 71 months had identical portfolios; the remaining month moved 0.23% of weight, within solver tolerance.
+- **Free Gurobi license:** it now solves up to **200 stocks**. The old model was refused at 150.
+- **Speed:** the model is built with Gurobi's matrix functions instead of a Python loop, so at 840 stocks building takes 0.1 s instead of 8 s per month.
+- **New dependency:** `scipy`, needed by Gurobi's matrix functions. The local environment is now listed in `Portfolio Optimization/requirements-local.txt`.
+
 ## What the algorithm fixes changed
 - **Risk scale (C3):** daily variance × 252 days, instead of an arbitrary square-root factor.
 - **Dates line up (H1):** returns are matched by date, and days with an unchanged price are kept. This also changed the BigQuery query.
@@ -91,10 +99,7 @@ All commands run from `Portfolio Optimization/`:
 - Refresh the data (about 20 minutes): `.venv-local\Scripts\python.exe scripts\ingest_idx_data.py --refresh`
 
 ## Open questions
-- **Gurobi license, for the full 840 stocks.** The free license allows about 100 stocks. Possible fixes:
-  - switch to "semi-continuous" variables (about 200 stocks on the free license);
-  - a free academic license;
-  - a WLS license.
+- **Gurobi license, for the full 840 stocks.** The free license now allows up to 200 stocks. For all 840, get a free academic license or a WLS license. Otherwise, pick a universe of at most 200 stocks, for example IDX80 or the 200 most liquid.
 - **Default window.** Switch the default from 30 to 60 days? It came out best on risk accuracy, but that was judged on this same backtest.
 - **Sector mapping.** 480 of 840 stocks fall into "Other". The sector names can be changed freely, since no API depends on them.
 - **Expected return (M3).** It is one trailing 30-day return, and turnover is 74% a month. Keep it, or switch to something steadier?
